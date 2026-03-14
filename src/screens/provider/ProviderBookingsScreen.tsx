@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,152 +6,153 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockBookings = [
-  { 
-    id: 1, 
-    service: 'Home Cleaning', 
-    customer: 'John Doe', 
-    status: 'PENDING', 
-    date: '2024-02-22', 
-    time: '10:00 AM',
-    amount: 45,
-    location: '123 Main St, City, State',
-    customerPhone: '+1234567890'
-  },
-  { 
-    id: 2, 
-    service: 'Plumbing Repair', 
-    customer: 'Sarah Smith', 
-    status: 'ACCEPTED', 
-    date: '2024-02-21', 
-    time: '2:00 PM',
-    amount: 85,
-    location: '456 Oak Ave, City, State',
-    customerPhone: '+0987654321'
-  },
-  { 
-    id: 3, 
-    service: 'Cooking', 
-    customer: 'Mike Johnson', 
-    status: 'IN_PROGRESS', 
-    date: '2024-02-20', 
-    time: '6:00 PM',
-    amount: 60,
-    location: '789 Pine Rd, City, State',
-    customerPhone: '+1122334455'
-  },
-  { 
-    id: 4, 
-    service: 'Gardening', 
-    customer: 'Emma Wilson', 
-    status: 'COMPLETED', 
-    date: '2024-02-19', 
-    time: '9:00 AM',
-    amount: 35,
-    location: '321 Elm St, City, State',
-    customerPhone: '+3344556677'
-  },
-];
+import bookingService from '../../services/bookingService';
+import { Booking } from '../../types';
 
 const ProviderBookingsScreen = ({ navigation }: any) => {
-  const [bookings, setBookings] = useState(mockBookings);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<number | null>(null);
 
-  const onRefresh = () => {
+  const loadBookings = async () => {
+    try {
+      setLoading(true);
+      const bookingsResponse = await bookingService.getMyBookings();
+      setBookings(bookingsResponse);
+    } catch (error) {
+      console.error('Error loading bookings:', error);
+      Alert.alert('Error', 'Failed to load bookings. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBookings();
+  }, []);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadBookings();
+    setRefreshing(false);
   };
 
   const handleBookingPress = (booking: any) => {
     navigation.navigate('ProviderBookingDetails', { bookingId: booking.id });
   };
 
-  const handleAcceptBooking = (booking: any) => {
+  const handleAcceptBooking = async (booking: Booking) => {
     Alert.alert(
       'Accept Booking',
-      `Accept booking from ${booking.customer} for ${booking.service}?`,
+      `Accept booking from ${booking.customer.username} for ${booking.service.name}?`,
       [
         { text: 'No', style: 'cancel' },
         {
           text: 'Accept',
-          onPress: () => {
-            setBookings(prevBookings =>
-              prevBookings.map(b =>
-                b.id === booking.id ? { ...b, status: 'ACCEPTED' } : b
-              )
-            );
-            Alert.alert('Success', 'Booking has been accepted.');
+          onPress: async () => {
+            try {
+              setActionLoading(booking.id);
+              const updatedBooking = await bookingService.acceptBooking(booking.id);
+              setBookings(prevBookings =>
+                prevBookings.map(b => b.id === booking.id ? updatedBooking : b)
+              );
+              Alert.alert('Success', 'Booking has been accepted.');
+            } catch (error) {
+              console.error('Error accepting booking:', error);
+              Alert.alert('Error', 'Failed to accept booking. Please try again.');
+            } finally {
+              setActionLoading(null);
+            }
           },
         },
       ]
     );
   };
 
-  const handleRejectBooking = (booking: any) => {
+  const handleRejectBooking = async (booking: Booking) => {
     Alert.alert(
       'Reject Booking',
-      `Reject booking from ${booking.customer} for ${booking.service}?`,
+      `Reject booking from ${booking.customer.username} for ${booking.service.name}?`,
       [
         { text: 'No', style: 'cancel' },
         {
           text: 'Reject',
-          onPress: () => {
-            setBookings(prevBookings =>
-              prevBookings.map(b =>
-                b.id === booking.id ? { ...b, status: 'REJECTED' } : b
-              )
-            );
-            Alert.alert('Rejected', 'Booking has been rejected.');
+          onPress: async () => {
+            try {
+              setActionLoading(booking.id);
+              const updatedBooking = await bookingService.rejectBooking(booking.id);
+              setBookings(prevBookings =>
+                prevBookings.map(b => b.id === booking.id ? updatedBooking : b)
+              );
+              Alert.alert('Rejected', 'Booking has been rejected.');
+            } catch (error) {
+              console.error('Error rejecting booking:', error);
+              Alert.alert('Error', 'Failed to reject booking. Please try again.');
+            } finally {
+              setActionLoading(null);
+            }
           },
         },
       ]
     );
   };
 
-  const handleStartService = (booking: any) => {
+  const handleStartService = async (booking: Booking) => {
     Alert.alert(
       'Start Service',
-      `Start ${booking.service} for ${booking.customer}?`,
+      `Start ${booking.service.name} for ${booking.customer.username}?`,
       [
         { text: 'No', style: 'cancel' },
         {
           text: 'Start',
-          onPress: () => {
-            setBookings(prevBookings =>
-              prevBookings.map(b =>
-                b.id === booking.id ? { ...b, status: 'IN_PROGRESS' } : b
-              )
-            );
-            Alert.alert('Started', 'Service has been started.');
+          onPress: async () => {
+            try {
+              setActionLoading(booking.id);
+              const updatedBooking = await bookingService.startService(booking.id);
+              setBookings(prevBookings =>
+                prevBookings.map(b => b.id === booking.id ? updatedBooking : b)
+              );
+              Alert.alert('Started', 'Service has been started.');
+            } catch (error) {
+              console.error('Error starting service:', error);
+              Alert.alert('Error', 'Failed to start service. Please try again.');
+            } finally {
+              setActionLoading(null);
+            }
           },
         },
       ]
     );
   };
 
-  const handleCompleteService = (booking: any) => {
+  const handleCompleteService = async (booking: Booking) => {
     Alert.alert(
       'Complete Service',
-      `Mark ${booking.service} as completed for ${booking.customer}?`,
+      `Mark ${booking.service.name} as completed for ${booking.customer.username}?`,
       [
         { text: 'No', style: 'cancel' },
         {
           text: 'Complete',
-          onPress: () => {
-            setBookings(prevBookings =>
-              prevBookings.map(b =>
-                b.id === booking.id ? { ...b, status: 'COMPLETED' } : b
-              )
-            );
-            Alert.alert('Completed', 'Service has been marked as completed.');
+          onPress: async () => {
+            try {
+              setActionLoading(booking.id);
+              const updatedBooking = await bookingService.completeService(booking.id);
+              setBookings(prevBookings =>
+                prevBookings.map(b => b.id === booking.id ? updatedBooking : b)
+              );
+              Alert.alert('Completed', 'Service has been marked as completed.');
+            } catch (error) {
+              console.error('Error completing service:', error);
+              Alert.alert('Error', 'Failed to complete service. Please try again.');
+            } finally {
+              setActionLoading(null);
+            }
           },
         },
       ]
@@ -180,16 +181,34 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
     }
   };
 
-  const canAccept = (booking: any) => booking.status === 'PENDING';
-  const canReject = (booking: any) => booking.status === 'PENDING';
-  const canStart = (booking: any) => booking.status === 'ACCEPTED';
-  const canComplete = (booking: any) => booking.status === 'IN_PROGRESS';
+  const canAccept = (booking: Booking) => booking.status === 'PENDING';
+  const canReject = (booking: Booking) => booking.status === 'PENDING';
+  const canStart = (booking: Booking) => booking.status === 'ACCEPTED';
+  const canComplete = (booking: Booking) => booking.status === 'IN_PROGRESS';
+
+  const formatBookingDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric'
+    });
+  };
+
+  const formatBookingTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit', 
+      hour12: true 
+    });
+  };
 
   const filteredBookings = selectedStatus === 'ALL' 
     ? bookings 
     : bookings.filter(booking => booking.status === selectedStatus);
 
-  const renderBookingItem = ({ item }: any) => (
+  const renderBookingItem = ({ item }: { item: Booking }) => (
     <View style={{
       backgroundColor: colors.surface,
       borderRadius: borderRadius.md,
@@ -209,27 +228,27 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
               color: colors.text,
               marginBottom: spacing.xs,
             }}>
-              {item.service}
+              {item.service.name}
             </Text>
             <Text style={{
               fontSize: typography.body,
               color: colors.textSecondary,
               marginBottom: spacing.xs,
             }}>
-              Customer: {item.customer}
+              Customer: {item.customer.username}
             </Text>
             <Text style={{
               fontSize: typography.caption,
               color: colors.textLight,
               marginBottom: spacing.xs,
             }}>
-              {item.date} at {item.time}
+              {formatBookingDate(item.scheduledTime || item.createdAt)} at {formatBookingTime(item.scheduledTime || item.createdAt)}
             </Text>
             <Text style={{
               fontSize: typography.caption,
               color: colors.textLight,
             }}>
-              📍 {item.location}
+              📍 {item.serviceLocation.address || 'Location not specified'}
             </Text>
           </View>
           <View style={{
@@ -256,13 +275,13 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
             fontWeight: 'bold',
             color: colors.primary,
           }}>
-            ${item.amount}
+            ${item.totalAmount || 0}
           </Text>
           <Text style={{
             fontSize: typography.caption,
             color: colors.textLight,
           }}>
-            📞 {item.customerPhone}
+            📞 {item.customer.mobileNumber || 'No phone'}
           </Text>
         </View>
         
@@ -275,16 +294,22 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
                 paddingVertical: spacing.xs,
                 paddingHorizontal: spacing.sm,
                 marginRight: spacing.xs,
+                opacity: actionLoading === item.id ? 0.5 : 1,
               }}
               onPress={() => handleAcceptBooking(item)}
+              disabled={actionLoading === item.id}
             >
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.background,
-                fontWeight: '600',
-              }}>
-                Accept
-              </Text>
+              {actionLoading === item.id ? (
+                <ActivityIndicator size="small" color={colors.background} />
+              ) : (
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.background,
+                  fontWeight: '600',
+                }}>
+                  Accept
+                </Text>
+              )}
             </TouchableOpacity>
           )}
           
@@ -296,16 +321,22 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
                 paddingVertical: spacing.xs,
                 paddingHorizontal: spacing.sm,
                 marginRight: spacing.xs,
+                opacity: actionLoading === item.id ? 0.5 : 1,
               }}
               onPress={() => handleRejectBooking(item)}
+              disabled={actionLoading === item.id}
             >
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.background,
-                fontWeight: '600',
-              }}>
-                Reject
-              </Text>
+              {actionLoading === item.id ? (
+                <ActivityIndicator size="small" color={colors.background} />
+              ) : (
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.background,
+                  fontWeight: '600',
+                }}>
+                  Reject
+                </Text>
+              )}
             </TouchableOpacity>
           )}
           
@@ -317,16 +348,22 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
                 paddingVertical: spacing.xs,
                 paddingHorizontal: spacing.sm,
                 marginRight: spacing.xs,
+                opacity: actionLoading === item.id ? 0.5 : 1,
               }}
               onPress={() => handleStartService(item)}
+              disabled={actionLoading === item.id}
             >
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.background,
-                fontWeight: '600',
-              }}>
-                Start
-              </Text>
+              {actionLoading === item.id ? (
+                <ActivityIndicator size="small" color={colors.background} />
+              ) : (
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.background,
+                  fontWeight: '600',
+                }}>
+                  Start
+                </Text>
+              )}
             </TouchableOpacity>
           )}
           
@@ -337,16 +374,22 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
                 borderRadius: borderRadius.sm,
                 paddingVertical: spacing.xs,
                 paddingHorizontal: spacing.sm,
+                opacity: actionLoading === item.id ? 0.5 : 1,
               }}
               onPress={() => handleCompleteService(item)}
+              disabled={actionLoading === item.id}
             >
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.background,
-                fontWeight: '600',
-              }}>
-                Complete
-              </Text>
+              {actionLoading === item.id ? (
+                <ActivityIndicator size="small" color={colors.background} />
+              ) : (
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.background,
+                  fontWeight: '600',
+                }}>
+                  Complete
+                </Text>
+              )}
             </TouchableOpacity>
           )}
         </View>
@@ -379,7 +422,13 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading bookings...</Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -448,25 +497,8 @@ const ProviderBookingsScreen = ({ navigation }: any) => {
             </View>
           }
         />
-
-        {/* Stats Footer */}
-        <View style={{
-          backgroundColor: colors.surface,
-          padding: spacing.lg,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
-        }}>
-          <Text style={{
-            fontSize: typography.caption,
-            color: colors.textSecondary,
-            textAlign: 'center',
-          }}>
-            Total: {filteredBookings.length} bookings • 
-            Pending: {filteredBookings.filter(b => b.status === 'PENDING').length} • 
-            Active: {filteredBookings.filter(b => ['ACCEPTED', 'IN_PROGRESS'].includes(b.status)).length}
-          </Text>
-        </View>
       </View>
+      )}
     </SafeAreaView>
   );
 };

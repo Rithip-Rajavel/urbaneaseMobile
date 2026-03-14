@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,46 +6,166 @@ import {
   ScrollView,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
+import bookingService from '../../services/bookingService';
+import reviewService from '../../services/reviewService';
+import { ProviderProfile, Booking, Review, ProviderService } from '../../types';
 
-// Mock data - will be replaced with API calls
-const mockProviderData = {
-  user: { username: 'sarah_smith', email: 'sarah@example.com', phone: '+1234567890' },
-  profile: {
-    firstName: 'Sarah',
-    lastName: 'Smith',
-    bio: 'Experienced cleaning professional with 5+ years in residential and commercial cleaning.',
-    profileImageUrl: null,
-    yearsOfExperience: 5,
-    averageRating: 4.8,
-    totalReviews: 127,
-    completedJobs: 156,
-    verificationStatus: 'VERIFIED',
-    businessName: 'Sarah\'s Cleaning Services',
-    businessLicense: 'CLN-2024-001',
-  },
-  services: [
-    { id: 1, name: 'Regular Cleaning', price: 25, description: 'Standard home cleaning service', active: true },
-    { id: 2, name: 'Deep Cleaning', price: 35, description: 'Thorough deep cleaning service', active: true },
-    { id: 3, name: 'Office Cleaning', price: 30, description: 'Professional office cleaning', active: true },
-    { id: 4, name: 'Post-Construction Cleaning', price: 40, description: 'Cleaning after construction work', active: false },
-  ],
+interface ProviderData {
+  profile: ProviderProfile | null;
+  services: ProviderService[];
   stats: {
-    totalBookings: 156,
-    completedBookings: 127,
-    averageRating: 4.8,
-    totalEarnings: 3456.78,
-    responseTime: '2 hours',
-    completionRate: 95,
-  },
-};
+    totalBookings: number;
+    completedBookings: number;
+    averageRating: number;
+    totalEarnings: number;
+    responseTime: string;
+    completionRate: number;
+  };
+}
 
 const ProviderProfileScreen = ({ navigation }: any) => {
   const { user, logout } = useAuth();
-  const [providerData, setProviderData] = useState(mockProviderData);
+  const [providerData, setProviderData] = useState<ProviderData>({
+    profile: null,
+    services: [],
+    stats: {
+      totalBookings: 0,
+      completedBookings: 0,
+      averageRating: 0,
+      totalEarnings: 0,
+      responseTime: '0 hours',
+      completionRate: 0,
+    },
+  });
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<number | null>(null);
+
+  const loadProviderData = async () => {
+    try {
+      setLoading(true);
+      
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+
+      // Load provider profile
+      // Note: This would need a dedicated API endpoint to get provider profile by user ID
+      // For now, we'll construct it from available data
+      
+      // Load bookings for stats
+      const bookingsResponse = await bookingService.getMyBookings();
+      const completedBookings = bookingsResponse.filter(b => b.status === 'COMPLETED');
+      
+      // Load reviews for rating
+      let averageRating = 0;
+      let totalReviews = 0;
+      try {
+        const reviewsResponse = await reviewService.getProviderReviews(user.id);
+        totalReviews = reviewsResponse.length;
+        if (totalReviews > 0) {
+          averageRating = reviewsResponse.reduce((sum, review) => sum + review.rating, 0) / totalReviews;
+        }
+      } catch (error) {
+        console.error('Error loading reviews:', error);
+      }
+      
+      // Calculate stats
+      const totalEarnings = completedBookings.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      const completionRate = bookingsResponse.length > 0 
+        ? (completedBookings.length / bookingsResponse.length) * 100 
+        : 0;
+      
+      // Create a mock provider profile based on user data
+      const profile: ProviderProfile = {
+        id: user.id,
+        user: user,
+        firstName: user.username.split('_')[0] || 'First',
+        lastName: user.username.split('_')[1] || 'Last',
+        bio: 'Professional service provider',
+        yearsOfExperience: 3,
+        averageRating,
+        totalReviews,
+        completedJobs: completedBookings.length,
+        verificationStatus: 'VERIFIED', // This would come from API
+        businessName: `${user.username}'s Services`,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      };
+      
+      // Mock services - this would come from API
+      const services: ProviderService[] = [
+        {
+          id: 1,
+          provider: user,
+          service: {
+            id: 1,
+            name: 'Regular Cleaning',
+            description: 'Standard home cleaning service',
+            category: { id: 1, name: 'Cleaning', description: '', iconUrl: '', createdAt: '', updatedAt: '', services: [], active: true },
+            basePrice: 25,
+            estimatedDuration: 2,
+            createdAt: '',
+            updatedAt: '',
+            active: true,
+          },
+          customPrice: 25,
+          description: 'Standard home cleaning service',
+          yearsOfExperience: 3,
+          createdAt: '',
+          updatedAt: '',
+          active: true,
+        },
+        {
+          id: 2,
+          provider: user,
+          service: {
+            id: 2,
+            name: 'Deep Cleaning',
+            description: 'Thorough deep cleaning service',
+            category: { id: 1, name: 'Cleaning', description: '', iconUrl: '', createdAt: '', updatedAt: '', services: [], active: true },
+            basePrice: 35,
+            estimatedDuration: 4,
+            createdAt: '',
+            updatedAt: '',
+            active: true,
+          },
+          customPrice: 35,
+          description: 'Thorough deep cleaning service',
+          yearsOfExperience: 3,
+          createdAt: '',
+          updatedAt: '',
+          active: true,
+        },
+      ];
+      
+      setProviderData({
+        profile,
+        services,
+        stats: {
+          totalBookings: bookingsResponse.length,
+          completedBookings: completedBookings.length,
+          averageRating,
+          totalEarnings,
+          responseTime: '2 hours', // This would come from API
+          completionRate,
+        },
+      });
+    } catch (error) {
+      console.error('Error loading provider data:', error);
+      Alert.alert('Error', 'Failed to load profile data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProviderData();
+  }, [user]);
 
   const handleEditProfile = () => {
     Alert.alert(
@@ -56,6 +176,38 @@ const ProviderProfileScreen = ({ navigation }: any) => {
         {
           text: 'Edit Profile',
           onPress: () => Alert.alert('Coming Soon', 'Profile editing feature coming soon!'),
+        },
+      ]
+    );
+  };
+
+  const toggleServiceStatus = async (service: ProviderService) => {
+    Alert.alert(
+      'Toggle Service',
+      `${service.active ? 'Deactivate' : 'Activate'} ${service.service.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: service.active ? 'Deactivate' : 'Activate',
+          onPress: async () => {
+            try {
+              setActionLoading(service.id);
+              // This would need an API endpoint to toggle service status
+              // For now, we'll just update the local state
+              setProviderData(prev => ({
+                ...prev,
+                services: prev.services.map(s =>
+                  s.id === service.id ? { ...s, active: !s.active } : s
+                )
+              }));
+              Alert.alert('Success', `Service ${service.active ? 'deactivated' : 'activated'} successfully.`);
+            } catch (error) {
+              console.error('Error toggling service:', error);
+              Alert.alert('Error', 'Failed to update service status. Please try again.');
+            } finally {
+              setActionLoading(null);
+            }
+          },
         },
       ]
     );
@@ -124,8 +276,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
       )}
     </TouchableOpacity>
   );
-
-  const ServiceItem = ({ item }: any) => (
+  const ServiceItem = ({ item }: { item: ProviderService }) => (
     <View style={{
       backgroundColor: colors.surface,
       borderRadius: borderRadius.md,
@@ -143,7 +294,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
           color: colors.text,
           marginBottom: spacing.xs,
         }}>
-          {item.name}
+          {item.service.name}
         </Text>
         <Text style={{
           fontSize: typography.caption,
@@ -160,7 +311,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
           fontWeight: 'bold',
           color: colors.primary,
         }}>
-          ${item.price}/hr
+          ${item.customPrice || item.service.basePrice}/hr
         </Text>
         <TouchableOpacity
           style={{
@@ -169,35 +320,22 @@ const ProviderProfileScreen = ({ navigation }: any) => {
             paddingVertical: spacing.xs,
             paddingHorizontal: spacing.sm,
             marginLeft: spacing.sm,
+            opacity: actionLoading === item.id ? 0.5 : 1,
           }}
-          onPress={() => {
-            Alert.alert(
-              'Toggle Service',
-              `${item.active ? 'Deactivate' : 'Activate'} ${item.name}?`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: item.active ? 'Deactivate' : 'Activate',
-                  onPress: () => {
-                    setProviderData(prev => ({
-                      ...prev,
-                      services: prev.services.map(s =>
-                        s.id === item.id ? { ...s, active: !s.active } : s
-                      )
-                    }));
-                  },
-                },
-              ]
-            );
-          }}
+          onPress={() => toggleServiceStatus(item)}
+          disabled={actionLoading === item.id}
         >
-          <Text style={{
-            fontSize: typography.caption,
-            color: colors.background,
-            fontWeight: '600',
-          }}>
-            {item.active ? 'Active' : 'Inactive'}
-          </Text>
+          {actionLoading === item.id ? (
+            <ActivityIndicator size="small" color={colors.background} />
+          ) : (
+            <Text style={{
+              fontSize: typography.caption,
+              color: colors.background,
+              fontWeight: '600',
+            }}>
+              {item.active ? 'Active' : 'Inactive'}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -205,7 +343,13 @@ const ProviderProfileScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading profile...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -229,62 +373,64 @@ const ProviderProfileScreen = ({ navigation }: any) => {
         </View>
 
         {/* Profile Info Card */}
-        <View style={{
-          backgroundColor: colors.surface,
-          borderRadius: borderRadius.md,
-          padding: spacing.lg,
-          marginHorizontal: spacing.lg,
-          marginBottom: spacing.lg,
-          alignItems: 'center',
-          ...shadows.small,
-        }}>
+        {providerData.profile && (
           <View style={{
-            width: responsiveWidth(80),
-            height: responsiveWidth(80),
-            borderRadius: responsiveWidth(40),
-            backgroundColor: colors.background,
-            justifyContent: 'center',
+            backgroundColor: colors.surface,
+            borderRadius: borderRadius.md,
+            padding: spacing.lg,
+            marginHorizontal: spacing.lg,
+            marginBottom: spacing.lg,
             alignItems: 'center',
-            marginBottom: spacing.md,
+            ...shadows.small,
           }}>
-            <Text style={{ fontSize: responsiveWidth(40) }}>👩‍🔧</Text>
-          </View>
-          
-          <Text style={{
-            fontSize: typography.h3,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: spacing.xs,
-          }}>
-            {providerData.profile.firstName} {providerData.profile.lastName}
-          </Text>
-          
-          <View style={{
-            backgroundColor: colors.success,
-            borderRadius: borderRadius.xs,
-            paddingHorizontal: spacing.xs,
-            paddingVertical: 2,
-            alignSelf: 'flex-start',
-            marginBottom: spacing.sm,
-          }}>
-            <Text style={{
-              fontSize: typography.caption,
-              color: colors.background,
-              fontWeight: '600',
+            <View style={{
+              width: responsiveWidth(80),
+              height: responsiveWidth(80),
+              borderRadius: responsiveWidth(40),
+              backgroundColor: colors.background,
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginBottom: spacing.md,
             }}>
-              ✓ Verified
+              <Text style={{ fontSize: responsiveWidth(40) }}>👩‍🔧</Text>
+            </View>
+            
+            <Text style={{
+              fontSize: typography.h3,
+              fontWeight: 'bold',
+              color: colors.text,
+              marginBottom: spacing.xs,
+            }}>
+              {providerData.profile.firstName} {providerData.profile.lastName}
+            </Text>
+            
+            <View style={{
+              backgroundColor: colors.success,
+              borderRadius: borderRadius.xs,
+              paddingHorizontal: spacing.xs,
+              paddingVertical: 2,
+              alignSelf: 'flex-start',
+              marginBottom: spacing.sm,
+            }}>
+              <Text style={{
+                fontSize: typography.caption,
+                color: colors.background,
+                fontWeight: '600',
+              }}>
+                ✓ Verified
+              </Text>
+            </View>
+            
+            <Text style={{
+              fontSize: typography.body,
+              color: colors.textSecondary,
+              textAlign: 'center',
+              marginBottom: spacing.sm,
+            }}>
+              {providerData.profile.businessName}
             </Text>
           </View>
-          
-          <Text style={{
-            fontSize: typography.body,
-            color: colors.textSecondary,
-            textAlign: 'center',
-            marginBottom: spacing.sm,
-          }}>
-            {providerData.profile.businessName}
-          </Text>
-        </View>
+        )}
 
         {/* Stats Overview */}
         <View style={{
@@ -416,7 +562,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
               fontSize: typography.body,
               color: colors.text,
             }}>
-              {providerData.user.email}
+              {user?.email || 'No email'}
             </Text>
           </View>
           
@@ -432,7 +578,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
               fontSize: typography.body,
               color: colors.text,
             }}>
-              {providerData.user.phone}
+              {user?.mobileNumber || 'No phone'}
             </Text>
           </View>
         </View>
@@ -511,7 +657,8 @@ const ProviderProfileScreen = ({ navigation }: any) => {
             showArrow={false}
           />
         </View>
-      </ScrollView>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };

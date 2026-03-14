@@ -5,38 +5,76 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
+import apiService from '../../services/api';
 
-// Mock data - will be replaced with API calls
-const mockStats = {
-  totalUsers: 1247,
-  totalProviders: 342,
-  totalBookings: 5621,
-  totalRevenue: 125430,
-  pendingVerifications: 23,
-  activeBookings: 89,
-};
+interface AdminStats {
+  totalUsers: number;
+  totalProviders: number;
+  totalBookings: number;
+  totalRevenue: number;
+  pendingVerifications: number;
+  activeBookings: number;
+}
 
-const mockRecentActivity = [
-  { id: 1, type: 'new_user', user: 'John Doe', time: '2 mins ago' },
-  { id: 2, type: 'booking', user: 'Sarah Smith', service: 'Cleaning', time: '5 mins ago' },
-  { id: 3, type: 'provider_verification', user: 'Mike Johnson', time: '12 mins ago' },
-  { id: 4, type: 'payment', user: 'Emma Wilson', amount: '$45', time: '1 hour ago' },
-];
+interface RecentActivity {
+  id: number;
+  type: string;
+  user: string;
+  service?: string;
+  amount?: string;
+  time: string;
+}
 
 const AdminDashboardScreen = ({ navigation }: any) => {
+  const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState(mockStats);
-  const [recentActivity, setRecentActivity] = useState(mockRecentActivity);
+  const [stats, setStats] = useState<AdminStats>({
+    totalUsers: 0,
+    totalProviders: 0,
+    totalBookings: 0,
+    totalRevenue: 0,
+    pendingVerifications: 0,
+    activeBookings: 0,
+  });
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+      
+      // Load dashboard stats
+      const statsResponse = await apiService.get('/api/admin/dashboard');
+      setStats(statsResponse.data as AdminStats);
+      
+      // Load recent activity - this would need a dedicated endpoint
+      // For now, we'll use empty array as there's no specific activity endpoint in the spec
+      setRecentActivity([]);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      Alert.alert('Error', 'Failed to load dashboard data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [user]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadDashboardData();
+    setRefreshing(false);
   };
 
   const StatCard = ({ title, value, subtitle, onPress, color = colors.primary }: any) => (
@@ -123,12 +161,18 @@ const AdminDashboardScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView
-        contentContainerStyle={{ flexGrow: 1 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading dashboard...</Text>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -324,6 +368,7 @@ const AdminDashboardScreen = ({ navigation }: any) => {
           </View>
         </View>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 };

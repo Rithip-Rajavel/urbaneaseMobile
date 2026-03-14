@@ -6,37 +6,54 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockUsers = [
-  { id: 1, username: 'john_doe', email: 'john@example.com', role: 'CUSTOMER', active: true, joinedDate: '2024-01-15' },
-  { id: 2, username: 'sarah_smith', email: 'sarah@example.com', role: 'SERVICE_PROVIDER', active: true, joinedDate: '2024-01-20' },
-  { id: 3, username: 'mike_wilson', email: 'mike@example.com', role: 'CUSTOMER', active: false, joinedDate: '2024-02-01' },
-  { id: 4, username: 'emma_jones', email: 'emma@example.com', role: 'ADMIN', active: true, joinedDate: '2024-02-10' },
-  { id: 5, username: 'alex_brown', email: 'alex@example.com', role: 'SERVICE_PROVIDER', active: true, joinedDate: '2024-02-15' },
-];
+import apiService from '../../services/api';
+import { User } from '../../types';
 
 const UsersManagementScreen = ({ navigation }: any) => {
-  const [users, setUsers] = useState(mockUsers);
+  const { user } = useAuth();
+  const [users, setUsers] = useState<User[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRole, setSelectedRole] = useState('ALL');
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
+  const loadUsers = async () => {
+    try {
+      setLoading(true);
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+      
+      // Load all users for admin
+      const response = await apiService.get('/api/admin/users');
+      setUsers(response.data as User[]);
+    } catch (error) {
+      console.error('Error loading users:', error);
+      Alert.alert('Error', 'Failed to load users. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUsers();
+  }, [user]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadUsers();
+    setRefreshing(false);
   };
 
   const handleUserPress = (user: any) => {
     navigation.navigate('UserDetails', { userId: user.id });
   };
 
-  const handleToggleUserStatus = (user: any) => {
+  const handleToggleUserStatus = async (user: User) => {
     Alert.alert(
       'Confirm Action',
       `Are you sure you want to ${user.active ? 'deactivate' : 'activate'} this user?`,
@@ -44,37 +61,73 @@ const UsersManagementScreen = ({ navigation }: any) => {
         { text: 'Cancel', style: 'cancel' },
         {
           text: user.active ? 'Deactivate' : 'Activate',
-          onPress: () => {
-            setUsers(prevUsers =>
-              prevUsers.map(u =>
-                u.id === user.id ? { ...u, active: !u.active } : u
-              )
-            );
+          onPress: async () => {
+            try {
+              const endpoint = user.active 
+                ? `/api/admin/users/${user.id}/deactivate`
+                : `/api/admin/users/${user.id}/activate`;
+              
+              await apiService.post(endpoint);
+              
+              // Update local state
+              setUsers(prevUsers =>
+                prevUsers.map(u =>
+                  u.id === user.id ? { ...u, active: !u.active } : u
+                )
+              );
+              
+              Alert.alert('Success', `User ${user.active ? 'deactivated' : 'activated'} successfully!`);
+            } catch (error) {
+              console.error('Error toggling user status:', error);
+              Alert.alert('Error', 'Failed to update user status. Please try again.');
+            }
           },
         },
       ]
     );
   };
 
-  const handleChangeRole = (user: any) => {
+  const handleChangeRole = async (user: User) => {
     Alert.alert(
       'Change Role',
       `Select new role for ${user.username}`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Customer', onPress: () => updateUserRole(user.id, 'CUSTOMER') },
-        { text: 'Provider', onPress: () => updateUserRole(user.id, 'SERVICE_PROVIDER') },
-        { text: 'Admin', onPress: () => updateUserRole(user.id, 'ADMIN') },
+        { 
+          text: 'Customer', 
+          onPress: () => updateUserRole(user.id, 'CUSTOMER') 
+        },
+        { 
+          text: 'Provider', 
+          onPress: () => updateUserRole(user.id, 'SERVICE_PROVIDER') 
+        },
+        { 
+          text: 'Admin', 
+          onPress: () => updateUserRole(user.id, 'ADMIN') 
+        },
       ]
     );
   };
 
-  const updateUserRole = (userId: number, newRole: string) => {
-    setUsers(prevUsers =>
-      prevUsers.map(u =>
-        u.id === userId ? { ...u, role: newRole } : u
-      )
-    );
+  const updateUserRole = async (userId: number, newRole: string) => {
+    try {
+      await apiService.post('/api/admin/users/change-role', {
+        userId,
+        newRole
+      });
+      
+      // Update local state
+      setUsers(prevUsers =>
+        prevUsers.map(u =>
+          u.id === userId ? { ...u, role: newRole as any } : u
+        )
+      );
+      
+      Alert.alert('Success', 'User role updated successfully!');
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      Alert.alert('Error', 'Failed to update user role. Please try again.');
+    }
   };
 
   const getRoleColor = (role: string) => {
@@ -90,7 +143,7 @@ const UsersManagementScreen = ({ navigation }: any) => {
     ? users 
     : users.filter(user => user.role === selectedRole);
 
-  const renderUserItem = ({ item }: any) => (
+  const renderUserItem = ({ item }: { item: User }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -162,7 +215,7 @@ const UsersManagementScreen = ({ navigation }: any) => {
             fontSize: typography.caption,
             color: colors.textLight,
           }}>
-            {item.active ? 'Active' : 'Inactive'} • Joined {item.joinedDate}
+            {item.active ? 'Active' : 'Inactive'} • Joined {new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
           </Text>
         </View>
       </View>
@@ -212,7 +265,13 @@ const UsersManagementScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading users...</Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -286,6 +345,7 @@ const UsersManagementScreen = ({ navigation }: any) => {
           </Text>
         </View>
       </View>
+      )}
     </SafeAreaView>
   );
 };

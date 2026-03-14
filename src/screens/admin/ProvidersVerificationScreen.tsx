@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,68 +6,107 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockProviders = [
-  { id: 1, name: 'John Smith', service: 'Cleaning', experience: 5, rating: 4.8, status: 'PENDING', appliedDate: '2024-02-20' },
-  { id: 2, name: 'Sarah Johnson', service: 'Cooking', experience: 3, rating: 4.9, status: 'VERIFIED', appliedDate: '2024-02-15' },
-  { id: 3, name: 'Mike Wilson', service: 'Plumbing', experience: 8, rating: 4.7, status: 'PENDING', appliedDate: '2024-02-22' },
-  { id: 4, name: 'Emma Davis', service: 'Gardening', experience: 2, rating: 4.6, status: 'REJECTED', appliedDate: '2024-02-18' },
-];
+import apiService from '../../services/api';
+import { ProviderProfile } from '../../types';
 
 const ProvidersVerificationScreen = ({ navigation }: any) => {
-  const [providers, setProviders] = useState(mockProviders);
+  const { user } = useAuth();
+  const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('PENDING');
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
+  const loadProviders = async () => {
+    try {
+      setLoading(true);
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+      
+      // Load pending provider verifications
+      const response = await apiService.get('/api/admin/providers/pending-verification');
+      setProviders(response.data as ProviderProfile[]);
+    } catch (error) {
+      console.error('Error loading providers:', error);
+      Alert.alert('Error', 'Failed to load providers. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProviders();
+  }, [user]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadProviders();
+    setRefreshing(false);
   };
 
   const handleProviderPress = (provider: any) => {
     navigation.navigate('ProviderVerification', { providerId: provider.id });
   };
 
-  const handleVerifyProvider = (provider: any) => {
+  const handleVerifyProvider = async (provider: ProviderProfile) => {
     Alert.alert(
       'Verify Provider',
-      `Are you sure you want to verify ${provider.name}?`,
+      `Are you sure you want to verify ${provider.user.username}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Verify',
-          onPress: () => {
-            setProviders(prevProviders =>
-              prevProviders.map(p =>
-                p.id === provider.id ? { ...p, status: 'VERIFIED' } : p
-              )
-            );
+          onPress: async () => {
+            try {
+              await apiService.post(`/api/admin/providers/${provider.id}/verify`);
+              
+              // Update local state
+              setProviders(prevProviders =>
+                prevProviders.map(p =>
+                  p.id === provider.id ? { ...p, verificationStatus: 'VERIFIED' } : p
+                )
+              );
+              
+              Alert.alert('Success', 'Provider verified successfully!');
+            } catch (error) {
+              console.error('Error verifying provider:', error);
+              Alert.alert('Error', 'Failed to verify provider. Please try again.');
+            }
           },
         },
       ]
     );
   };
 
-  const handleRejectProvider = (provider: any) => {
+  const handleRejectProvider = async (provider: ProviderProfile) => {
     Alert.alert(
       'Reject Provider',
-      `Are you sure you want to reject ${provider.name}?`,
+      `Are you sure you want to reject ${provider.user.username}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reject',
-          onPress: () => {
-            setProviders(prevProviders =>
-              prevProviders.map(p =>
-                p.id === provider.id ? { ...p, status: 'REJECTED' } : p
-              )
-            );
+          onPress: async () => {
+            try {
+              await apiService.post(`/api/admin/providers/${provider.id}/reject`);
+              
+              // Update local state
+              setProviders(prevProviders =>
+                prevProviders.map(p =>
+                  p.id === provider.id ? { ...p, verificationStatus: 'REJECTED' } : p
+                )
+              );
+              
+              Alert.alert('Success', 'Provider rejected successfully!');
+            } catch (error) {
+              console.error('Error rejecting provider:', error);
+              Alert.alert('Error', 'Failed to reject provider. Please try again.');
+            }
           },
         },
       ]
@@ -85,7 +124,7 @@ const ProvidersVerificationScreen = ({ navigation }: any) => {
 
   const filteredProviders = providers.filter(provider => provider.status === selectedStatus);
 
-  const renderProviderItem = ({ item }: any) => (
+  const renderProviderItem = ({ item }: { item: ProviderProfile }) => (
     <View style={{
       backgroundColor: colors.surface,
       borderRadius: borderRadius.md,
@@ -216,7 +255,13 @@ const ProvidersVerificationScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading providers...</Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -289,6 +334,7 @@ const ProvidersVerificationScreen = ({ navigation }: any) => {
           </Text>
         </View>
       </View>
+      )}
     </SafeAreaView>
   );
 };

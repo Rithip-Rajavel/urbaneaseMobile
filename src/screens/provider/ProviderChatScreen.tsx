@@ -8,26 +8,48 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockMessages = [
-  { id: 1, text: 'Hi! I\'m interested in your cleaning service', sender: 'customer', time: '10:00 AM' },
-  { id: 2, text: 'Hello! I\'d be happy to help you with cleaning. What type of cleaning do you need?', sender: 'provider', time: '10:02 AM' },
-  { id: 3, text: 'I need regular home cleaning for my 2-bedroom apartment', sender: 'customer', time: '10:05 AM' },
-  { id: 4, text: 'Perfect! I offer comprehensive cleaning services. My rate is $25/hour and I usually take 2-3 hours for a 2-bedroom apartment.', sender: 'provider', time: '10:07 AM' },
-  { id: 5, text: 'That sounds reasonable. When are you available?', sender: 'customer', time: '10:10 AM' },
-  { id: 6, text: 'I\'m available this Tuesday at 10 AM or Thursday at 2 PM. Which works better for you?', sender: 'provider', time: '10:12 AM' },
-];
+import messageService from '../../services/messageService';
+import { Message } from '../../types';
 
 const ProviderChatScreen = ({ route, navigation }: any) => {
+  const { user } = useAuth();
   const { conversationId, userName, bookingId } = route.params || { userName: 'John Doe' };
-  const [messages, setMessages] = useState(mockMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+
+  const loadMessages = async () => {
+    try {
+      setLoading(true);
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+      
+      // Load conversation messages
+      const messagesResponse = await messageService.getConversation(conversationId);
+      setMessages(messagesResponse);
+      
+      // Mark messages as read
+      await messageService.markMessagesAsRead(conversationId);
+    } catch (error) {
+      console.error('Error loading messages:', error);
+      Alert.alert('Error', 'Failed to load messages. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMessages();
+  }, [conversationId, user]);
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
@@ -36,29 +58,28 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
     }, 100);
   }, [messages]);
 
-  const handleSendMessage = () => {
-    if (newMessage.trim() === '') return;
+  const handleSendMessage = async () => {
+    if (newMessage.trim() === '' || !user?.id) return;
 
-    const newMsg = {
-      id: messages.length + 1,
-      text: newMessage.trim(),
-      sender: 'provider',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages(prev => [...prev, newMsg]);
-    setNewMessage('');
-
-    // Simulate customer response
-    setTimeout(() => {
-      const customerResponse = {
-        id: messages.length + 2,
-        text: 'Thanks for your message! I\'ll get back to you soon.',
-        sender: 'customer',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    try {
+      setSendingMessage(true);
+      
+      // Send message via API
+      const messageRequest = {
+        receiverId: conversationId, // This would need to be the actual customer ID
+        content: newMessage.trim(),
+        bookingId: bookingId,
       };
-      setMessages(prev => [...prev, customerResponse]);
-    }, 2000);
+      
+      const sentMessage = await messageService.sendMessage(messageRequest);
+      setMessages(prev => [...prev, sentMessage]);
+      setNewMessage('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   const handleCallCustomer = () => {
@@ -86,8 +107,17 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
     }
   };
 
-  const renderMessage = ({ item }: any) => {
-    const isProvider = item.sender === 'provider';
+  const formatMessageTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit', 
+      hour12: true 
+    });
+  };
+
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isProvider = item.sender.id === user?.id;
     
     return (
       <View style={{
@@ -100,8 +130,9 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
           maxWidth: '70%',
           backgroundColor: isProvider ? colors.primary : colors.surface,
           borderRadius: borderRadius.md,
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.md,
+          padding: spacing.md,
+          marginLeft: isProvider ? spacing.md : 0,
+          marginRight: isProvider ? 0 : spacing.md,
           ...shadows.small,
         }}>
           <Text style={{
@@ -109,7 +140,7 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
             color: isProvider ? colors.background : colors.text,
             lineHeight: typography.body * 1.4,
           }}>
-            {item.text}
+            {item.content}
           </Text>
           <Text style={{
             fontSize: typography.caption,
@@ -117,7 +148,7 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
             marginTop: spacing.xs,
             textAlign: isProvider ? 'right' : 'left',
           }}>
-            {item.time}
+            {formatMessageTime(item.createdAt)}
           </Text>
         </View>
       </View>
@@ -202,15 +233,34 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
         </View>
 
         {/* Messages List */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={{ flexGrow: 1 }}
-          showsVerticalScrollIndicator={false}
-          ListFooterComponent={isTyping ? renderTypingIndicator : null}
-        />
+        {loading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading messages...</Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={{ flexGrow: 1 }}
+            showsVerticalScrollIndicator={false}
+            ListFooterComponent={isTyping ? renderTypingIndicator : null}
+            ListEmptyComponent={
+              <View style={{ alignItems: 'center', paddingVertical: spacing.xl }}>
+                <Text style={{ fontSize: responsiveWidth(40), marginBottom: spacing.md }}>💬</Text>
+                <Text style={{
+                  fontSize: typography.body,
+                  color: colors.textSecondary,
+                  textAlign: 'center',
+                }}>
+                  No messages yet. Start the conversation!
+                </Text>
+              </View>
+            }
+          />
+        )}
 
         {/* Message Input */}
         <KeyboardAvoidingView
@@ -261,13 +311,18 @@ const ProviderChatScreen = ({ route, navigation }: any) => {
                 height: responsiveWidth(40),
                 justifyContent: 'center',
                 alignItems: 'center',
+                opacity: sendingMessage ? 0.5 : 1,
               }}
               onPress={handleSendMessage}
-              disabled={newMessage.trim() === ''}
+              disabled={newMessage.trim() === '' || sendingMessage}
             >
-              <Text style={{ fontSize: responsiveWidth(20), color: colors.background }}>
-                ➤
-              </Text>
+              {sendingMessage ? (
+                <ActivityIndicator size="small" color={colors.background} />
+              ) : (
+                <Text style={{ fontSize: responsiveWidth(20), color: colors.background }}>
+                  ➤
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>

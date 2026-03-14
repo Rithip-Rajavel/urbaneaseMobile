@@ -1,73 +1,50 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockReviews = [
-  {
-    id: 1,
-    customerName: 'John Doe',
-    rating: 5,
-    comment: 'Sarah did an amazing job cleaning my apartment! Very professional and thorough.',
-    date: '2024-02-20',
-    service: 'Home Cleaning',
-    avatar: '👤'
-  },
-  {
-    id: 2,
-    customerName: 'Emma Wilson',
-    rating: 4,
-    comment: 'Good service, arrived on time and did a thorough job. Would recommend!',
-    date: '2024-02-18',
-    service: 'Deep Cleaning',
-    avatar: '👩'
-  },
-  {
-    id: 3,
-    customerName: 'Mike Johnson',
-    rating: 5,
-    comment: 'Excellent work! Sarah is very detail-oriented and left my home sparkling clean.',
-    date: '2024-02-15',
-    service: 'Regular Cleaning',
-    avatar: '👨'
-  },
-  {
-    id: 4,
-    customerName: 'Lisa Davis',
-    rating: 5,
-    comment: 'Very satisfied with the service. Sarah is professional and reliable.',
-    date: '2024-02-10',
-    service: 'Office Cleaning',
-    avatar: '👩'
-  },
-  {
-    id: 5,
-    customerName: 'Tom Harris',
-    rating: 4,
-    comment: 'Good quality cleaning. A bit pricey but worth it for the quality.',
-    date: '2024-02-05',
-    service: 'Home Cleaning',
-    avatar: '👨'
-  },
-];
+import reviewService from '../../services/reviewService';
+import { Review } from '../../types';
 
 const ProviderReviewsScreen = ({ navigation }: any) => {
-  const [reviews, setReviews] = useState(mockReviews);
+  const { user } = useAuth();
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRating, setSelectedRating] = useState('all');
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
+  const loadReviews = async () => {
+    try {
+      setLoading(true);
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+      const reviewsResponse = await reviewService.getProviderReviews(user.id);
+      setReviews(reviewsResponse);
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+      Alert.alert('Error', 'Failed to load reviews. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadReviews();
+  }, [user]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadReviews();
+    setRefreshing(false);
   };
 
   const renderStars = (rating: number) => {
@@ -88,7 +65,16 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
     );
   };
 
-  const renderReviewItem = ({ item }: any) => (
+  const formatReviewDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
+  const renderReviewItem = ({ item }: { item: Review }) => (
     <View style={{
       backgroundColor: colors.surface,
       borderRadius: borderRadius.md,
@@ -106,7 +92,7 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
           alignItems: 'center',
           marginRight: spacing.md,
         }}>
-          <Text style={{ fontSize: responsiveWidth(20) }}>{item.avatar}</Text>
+          <Text style={{ fontSize: responsiveWidth(20) }}>👤</Text>
         </View>
         
         <View style={{ flex: 1 }}>
@@ -116,7 +102,7 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
             color: colors.text,
             marginBottom: spacing.xs,
           }}>
-            {item.customerName}
+            {item.customer.username}
           </Text>
           
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -126,7 +112,7 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
               color: colors.textLight,
               marginLeft: spacing.sm,
             }}>
-              {item.date}
+              {formatReviewDate(item.createdAt)}
             </Text>
           </View>
         </View>
@@ -138,7 +124,7 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
           color: colors.textSecondary,
           marginBottom: spacing.xs,
         }}>
-          Service: {item.service}
+          Service: {item.booking?.service?.name || 'Service not specified'}
         </Text>
       </View>
       
@@ -147,7 +133,7 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
         color: colors.text,
         lineHeight: typography.body * 1.4,
       }}>
-        {item.comment}
+        {item.comment || 'No comment provided'}
       </Text>
     </View>
   );
@@ -234,7 +220,13 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading reviews...</Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -368,6 +360,7 @@ const ProviderReviewsScreen = ({ navigation }: any) => {
           </Text>
         </View>
       </View>
+      )}
     </SafeAreaView>
   );
 };

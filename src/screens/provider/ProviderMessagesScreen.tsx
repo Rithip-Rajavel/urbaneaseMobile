@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,101 +7,143 @@ import {
   RefreshControl,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
+import messageService from '../../services/messageService';
+import bookingService from '../../services/bookingService';
+import { Message, Booking } from '../../types';
 
-// Mock data - will be replaced with API calls
-const mockConversations = [
-  { 
-    id: 1, 
-    name: 'John Doe', 
-    service: 'Home Cleaning', 
-    lastMessage: 'See you tomorrow at 10 AM!', 
-    time: '2 mins ago', 
-    unread: 0,
-    avatar: '👤',
-    bookingId: 1
-  },
-  { 
-    id: 2, 
-    name: 'Sarah Smith', 
-    service: 'Plumbing', 
-    lastMessage: 'The repair is complete', 
-    time: '1 hour ago', 
-    unread: 1,
-    avatar: '👩',
-    bookingId: 2
-  },
-  { 
-    id: 3, 
-    name: 'Mike Johnson', 
-    service: 'Cooking', 
-    lastMessage: 'What ingredients do you prefer?', 
-    time: '3 hours ago', 
-    unread: 2,
-    avatar: '👨',
-    bookingId: 3
-  },
-  { 
-    id: 4, 
-    name: 'Lisa Davis', 
-    service: 'Gardening', 
-    lastMessage: 'Thanks for the booking!', 
-    time: 'Yesterday', 
-    unread: 0,
-    avatar: '👩',
-    bookingId: 4
-  },
-  { 
-    id: 5, 
-    name: 'Tom Wilson', 
-    service: 'Electrical', 
-    lastMessage: 'I can come tomorrow', 
-    time: '2 days ago', 
-    unread: 0,
-    avatar: '👨',
-    bookingId: 5
-  },
-];
+interface Conversation {
+  id: number;
+  userName: string;
+  service: string;
+  lastMessage: string;
+  time: string;
+  unread: number;
+  bookingId: number;
+  phoneNumber?: string;
+  avatar: string;
+}
 
 const ProviderMessagesScreen = ({ navigation }: any) => {
-  const [conversations, setConversations] = useState(mockConversations);
+  const { user } = useAuth();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+  const loadConversations = async () => {
+    try {
+      setLoading(true);
+      
+      // Load bookings to get conversations
+      const bookingsResponse = await bookingService.getMyBookings();
+      
+      // Load unread messages
+      let unreadMessages: Message[] = [];
+      try {
+        unreadMessages = await messageService.getUnreadMessages();
+      } catch (error) {
+        console.error('Error loading unread messages:', error);
+      }
+      
+      // Create conversations from bookings
+      const conversationsData: Conversation[] = bookingsResponse.map(booking => {
+        const bookingMessages = unreadMessages.filter(msg => msg.booking?.id === booking.id);
+        const unreadCount = bookingMessages.filter(msg => !msg.read).length;
+        
+        return {
+          id: booking.id,
+          userName: booking.customer.username,
+          service: booking.service.name,
+          lastMessage: bookingMessages.length > 0 
+            ? bookingMessages[bookingMessages.length - 1].content 
+            : 'No messages yet',
+          time: bookingMessages.length > 0 
+            ? formatMessageTime(bookingMessages[bookingMessages.length - 1].createdAt)
+            : formatMessageTime(booking.createdAt),
+          unread: unreadCount,
+          bookingId: booking.id,
+          phoneNumber: booking.customer.mobileNumber,
+          avatar: '👤',
+        };
+      });
+      
+      setConversations(conversationsData);
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+      Alert.alert('Error', 'Failed to load conversations. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleConversationPress = (conversation: any) => {
+  useEffect(() => {
+    loadConversations();
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadConversations();
+    setRefreshing(false);
+  };
+
+  const formatMessageTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      const diffHours = Math.abs(now.getHours() - date.getHours());
+      if (diffHours === 0) {
+        const diffMins = Math.abs(now.getMinutes() - date.getMinutes());
+        return diffMins <= 1 ? 'Just now' : `${diffMins} mins ago`;
+      }
+      return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`;
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return date.toLocaleDateString('en-US', { weekday: 'short' });
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  };
+
+  const handleConversationPress = async (conversation: Conversation) => {
     navigation.navigate('ProviderChat', { 
       conversationId: conversation.id, 
-      userName: conversation.name,
+      userName: conversation.userName,
       bookingId: conversation.bookingId
     });
-    // Mark as read
-    setConversations(prevConversations =>
-      prevConversations.map(c =>
-        c.id === conversation.id ? { ...c, unread: 0 } : c
-      )
-    );
+    
+    // Mark messages as read
+    try {
+      await messageService.markMessagesAsRead(conversation.id);
+      setConversations(prevConversations =>
+        prevConversations.map(c =>
+          c.id === conversation.id ? { ...c, unread: 0 } : c
+        )
+      );
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+    }
   };
 
-  const handleCallCustomer = (conversation: any) => {
+  const handleCallCustomer = (conversation: Conversation) => {
     Alert.alert(
       'Call Customer',
-      `Call ${conversation.name} at their phone number?`,
+      `Call ${conversation.userName} at their phone number?`,
       [
         { text: 'No', style: 'cancel' },
         {
           text: 'Call',
           onPress: () => {
             // In a real app, this would open the phone dialer
-            Alert.alert('Calling', `Dialing ${conversation.name}...`);
+            Alert.alert('Calling', `Dialing ${conversation.userName}...`);
           },
         },
       ]
@@ -109,13 +151,13 @@ const ProviderMessagesScreen = ({ navigation }: any) => {
   };
 
   const filteredConversations = conversations.filter(conv =>
-    conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    conv.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     conv.service.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const unreadCount = conversations.reduce((sum, conv) => sum + conv.unread, 0);
 
-  const renderConversationItem = ({ item }: any) => (
+  const renderConversationItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -148,7 +190,7 @@ const ProviderMessagesScreen = ({ navigation }: any) => {
             fontWeight: '600',
             color: colors.text,
           }}>
-            {item.name}
+            {item.userName}
           </Text>
           <Text style={{
             fontSize: typography.caption,
@@ -218,7 +260,13 @@ const ProviderMessagesScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading conversations...</Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
           backgroundColor: colors.surface,
@@ -334,6 +382,7 @@ const ProviderMessagesScreen = ({ navigation }: any) => {
           </Text>
         </View>
       </View>
+      )}
     </SafeAreaView>
   );
 };

@@ -1,32 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockBookings = [
-  { id: 1, customer: 'John Doe', provider: 'Sarah Smith', service: 'Cleaning', status: 'COMPLETED', amount: 45, date: '2024-02-20' },
-  { id: 2, customer: 'Emma Wilson', provider: 'Mike Johnson', service: 'Plumbing', status: 'IN_PROGRESS', amount: 85, date: '2024-02-21' },
-  { id: 3, customer: 'Alex Brown', provider: 'Lisa Davis', service: 'Cooking', status: 'PENDING', amount: 60, date: '2024-02-22' },
-  { id: 4, customer: 'Tom Harris', provider: 'Sarah Smith', service: 'Cleaning', status: 'ACCEPTED', amount: 40, date: '2024-02-23' },
-];
+import apiService from '../../services/api';
+import { Booking } from '../../types';
 
 const BookingsManagementScreen = ({ navigation }: any) => {
-  const [bookings, setBookings] = useState(mockBookings);
+  const { user } = useAuth();
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
+  const loadBookings = async () => {
+    try {
+      setLoading(true);
+      if (!user?.id) {
+        throw new Error('User not found');
+      }
+      
+      // Load all bookings for admin
+      const response = await apiService.get('/api/admin/bookings');
+      setBookings(response.data as Booking[]);
+    } catch (error) {
+      console.error('Error loading bookings:', error);
+      Alert.alert('Error', 'Failed to load bookings. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBookings();
+  }, [user]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadBookings();
+    setRefreshing(false);
   };
 
   const handleBookingPress = (booking: any) => {
@@ -44,11 +64,20 @@ const BookingsManagementScreen = ({ navigation }: any) => {
     }
   };
 
+  const formatBookingDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
   const filteredBookings = selectedStatus === 'ALL' 
     ? bookings 
     : bookings.filter(booking => booking.status === selectedStatus);
 
-  const renderBookingItem = ({ item }: any) => (
+  const renderBookingItem = ({ item }: { item: Booking }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -66,7 +95,7 @@ const BookingsManagementScreen = ({ navigation }: any) => {
           fontWeight: '600',
           color: colors.text,
         }}>
-          {item.service}
+          {item.service.name}
         </Text>
         <View style={{
           backgroundColor: getStatusColor(item.status),
@@ -89,7 +118,7 @@ const BookingsManagementScreen = ({ navigation }: any) => {
         color: colors.textSecondary,
         marginBottom: spacing.xs,
       }}>
-        Customer: {item.customer} • Provider: {item.provider}
+        Customer: {item.customer.username} • Provider: {item.provider.username}
       </Text>
       
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -97,14 +126,14 @@ const BookingsManagementScreen = ({ navigation }: any) => {
           fontSize: typography.caption,
           color: colors.textLight,
         }}>
-          {item.date}
+          {formatBookingDate(item.createdAt)}
         </Text>
         <Text style={{
           fontSize: typography.body,
           fontWeight: '600',
           color: colors.primary,
         }}>
-          ${item.amount}
+          ${item.totalAmount || 0}
         </Text>
       </View>
     </TouchableOpacity>
@@ -135,7 +164,13 @@ const BookingsManagementScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading bookings...</Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -211,6 +246,7 @@ const BookingsManagementScreen = ({ navigation }: any) => {
           </Text>
         </View>
       </View>
+      )}
     </SafeAreaView>
   );
 };

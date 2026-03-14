@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,51 +6,162 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
+import bookingService from '../../services/bookingService';
+import { Booking } from '../../types';
 
-// Mock data - will be replaced with API calls
-const mockEarnings = {
-  totalEarnings: 3456.78,
-  thisMonthEarnings: 892.45,
-  lastMonthEarnings: 756.32,
-  weeklyEarnings: [234.50, 198.75, 312.25, 276.80, 298.15],
-  monthlyEarnings: [
-    { month: 'January', amount: 756.32 },
-    { month: 'February', amount: 892.45 },
-    { month: 'March', amount: 945.67 },
-    { month: 'April', amount: 823.90 },
-    { month: 'May', amount: 1024.33 },
-    { month: 'June', amount: 1134.78 },
-  ],
-  recentTransactions: [
-    { id: 1, service: 'Home Cleaning', customer: 'John Doe', amount: 45, date: 'Today, 2:30 PM', status: 'completed' },
-    { id: 2, service: 'Plumbing Repair', customer: 'Sarah Smith', amount: 85, date: 'Today, 11:15 AM', status: 'completed' },
-    { id: 3, service: 'Cooking', customer: 'Mike Johnson', amount: 60, date: 'Yesterday, 6:00 PM', status: 'completed' },
-    { id: 4, service: 'Gardening', customer: 'Emma Wilson', amount: 35, date: 'Yesterday, 9:00 AM', status: 'completed' },
-    { id: 5, service: 'Electrical Work', customer: 'Tom Harris', amount: 55, date: '2 days ago', status: 'completed' },
-  ],
-};
+interface EarningsData {
+  totalEarnings: number;
+  thisMonthEarnings: number;
+  lastMonthEarnings: number;
+  weeklyEarnings: number[];
+  monthlyEarnings: { month: string; amount: number }[];
+  recentTransactions: Booking[];
+}
 
 const EarningsScreen = ({ navigation }: any) => {
-  const [earnings, setEarnings] = useState(mockEarnings);
+  const { user } = useAuth();
+  const [earnings, setEarnings] = useState<EarningsData>({
+    totalEarnings: 0,
+    thisMonthEarnings: 0,
+    lastMonthEarnings: 0,
+    weeklyEarnings: [0, 0, 0, 0, 0],
+    monthlyEarnings: [],
+    recentTransactions: [],
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('month');
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+  const loadEarnings = async () => {
+    try {
+      setLoading(true);
+      
+      // Load all bookings to calculate earnings
+      const bookingsResponse = await bookingService.getMyBookings();
+      const completedBookings = bookingsResponse.filter(b => b.status === 'COMPLETED');
+      
+      // Calculate earnings from completed bookings
+      const totalEarnings = completedBookings.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      
+      // Calculate monthly earnings
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+      const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+      
+      const thisMonthEarnings = completedBookings
+        .filter(booking => {
+          const bookingDate = new Date(booking.createdAt);
+          return bookingDate.getMonth() === currentMonth && bookingDate.getFullYear() === currentYear;
+        })
+        .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      
+      const lastMonthEarnings = completedBookings
+        .filter(booking => {
+          const bookingDate = new Date(booking.createdAt);
+          return bookingDate.getMonth() === lastMonth && bookingDate.getFullYear() === lastMonthYear;
+        })
+        .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      
+      // Calculate weekly earnings (last 5 weeks)
+      const weeklyEarnings = [0, 0, 0, 0, 0];
+      const now = new Date();
+      for (let i = 0; i < 5; i++) {
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - (i * 7));
+        weekStart.setHours(0, 0, 0, 0);
+        
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        weekEnd.setHours(23, 59, 59, 999);
+        
+        weeklyEarnings[4 - i] = completedBookings
+          .filter(booking => {
+            const bookingDate = new Date(booking.createdAt);
+            return bookingDate >= weekStart && bookingDate <= weekEnd;
+          })
+          .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      }
+      
+      // Calculate monthly earnings for the last 6 months
+      const monthlyEarnings: { month: string; amount: number }[] = [];
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      
+      for (let i = 5; i >= 0; i--) {
+        const month = new Date();
+        month.setMonth(currentMonth - i);
+        const monthName = monthNames[month.getMonth()];
+        const monthYear = month.getFullYear();
+        
+        const monthEarnings = completedBookings
+          .filter(booking => {
+            const bookingDate = new Date(booking.createdAt);
+            return bookingDate.getMonth() === month.getMonth() && bookingDate.getFullYear() === monthYear;
+          })
+          .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+        
+        monthlyEarnings.push({ month: monthName, amount: monthEarnings });
+      }
+      
+      // Recent transactions (last 10 completed bookings)
+      const recentTransactions = completedBookings
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 10);
+      
+      setEarnings({
+        totalEarnings,
+        thisMonthEarnings,
+        lastMonthEarnings,
+        weeklyEarnings,
+        monthlyEarnings,
+        recentTransactions,
+      });
+    } catch (error) {
+      console.error('Error loading earnings:', error);
+      Alert.alert('Error', 'Failed to load earnings data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleTransactionPress = (transaction: any) => {
+  useEffect(() => {
+    loadEarnings();
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadEarnings();
+    setRefreshing(false);
+  };
+
+  const handleTransactionPress = (transaction: Booking) => {
     Alert.alert(
       'Transaction Details',
-      `Service: ${transaction.service}\nCustomer: ${transaction.customer}\nAmount: $${transaction.amount}\nDate: ${transaction.date}`,
+      `Service: ${transaction.service.name}\nCustomer: ${transaction.customer.username}\nAmount: $${transaction.totalAmount}\nDate: ${formatTransactionDate(transaction.createdAt)}`,
       [{ text: 'OK' }]
     );
+  };
+
+  const formatTransactionDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return `Today, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+    } else if (diffDays === 1) {
+      return `Yesterday, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+    } else if (diffDays < 7) {
+      return date.toLocaleDateString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+    }
   };
 
   const StatCard = ({ title, value, subtitle, color = colors.primary }: any) => (
@@ -89,7 +200,7 @@ const EarningsScreen = ({ navigation }: any) => {
     </View>
   );
 
-  const TransactionItem = ({ item }: any) => (
+  const TransactionItem = ({ item }: { item: Booking }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -122,14 +233,14 @@ const EarningsScreen = ({ navigation }: any) => {
           color: colors.text,
           marginBottom: spacing.xs,
         }}>
-          {item.service}
+          {item.service.name}
         </Text>
         <Text style={{
           fontSize: typography.caption,
           color: colors.textSecondary,
           marginBottom: spacing.xs,
         }}>
-          {item.customer} • {item.date}
+          {item.customer.username} • {formatTransactionDate(item.createdAt)}
         </Text>
       </View>
 
@@ -139,7 +250,7 @@ const EarningsScreen = ({ navigation }: any) => {
           fontWeight: 'bold',
           color: colors.primary,
         }}>
-          ${item.amount}
+          ${item.totalAmount || 0}
         </Text>
       </View>
     </TouchableOpacity>
@@ -218,7 +329,15 @@ const EarningsScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading earnings...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -458,7 +577,8 @@ const EarningsScreen = ({ navigation }: any) => {
             </Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };

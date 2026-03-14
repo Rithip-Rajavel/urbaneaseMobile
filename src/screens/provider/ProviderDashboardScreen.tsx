@@ -1,42 +1,137 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
+import bookingService from '../../services/bookingService';
+import reviewService from '../../services/reviewService';
+import messageService from '../../services/messageService';
+import { Booking, Review, Message } from '../../types';
 
-// Mock data - will be replaced with API calls
-const mockStats = {
-  totalEarnings: 3456.78,
-  thisMonthEarnings: 892.45,
-  completedJobs: 156,
-  pendingJobs: 3,
-  averageRating: 4.8,
-  totalReviews: 127,
-  activeBookings: 2,
-  upcomingBookings: 1,
-};
-
-const mockRecentBookings = [
-  { id: 1, service: 'Home Cleaning', customer: 'John Doe', date: 'Today, 2:00 PM', status: 'IN_PROGRESS', amount: 45 },
-  { id: 2, service: 'Plumbing', customer: 'Sarah Smith', date: 'Tomorrow, 10:00 AM', status: 'ACCEPTED', amount: 85 },
-  { id: 3, service: 'Cooking', customer: 'Mike Johnson', date: 'Yesterday', status: 'COMPLETED', amount: 60 },
-];
+interface DashboardStats {
+  totalEarnings: number;
+  thisMonthEarnings: number;
+  completedJobs: number;
+  pendingJobs: number;
+  averageRating: number;
+  totalReviews: number;
+  activeBookings: number;
+  upcomingBookings: number;
+  completionRate: number;
+  avgJobTime: number;
+}
 
 const ProviderDashboardScreen = ({ navigation }: any) => {
-  const [stats, setStats] = useState(mockStats);
-  const [recentBookings, setRecentBookings] = useState(mockRecentBookings);
+  const { user } = useAuth();
+  const [stats, setStats] = useState<DashboardStats>({
+    totalEarnings: 0,
+    thisMonthEarnings: 0,
+    completedJobs: 0,
+    pendingJobs: 0,
+    averageRating: 0,
+    totalReviews: 0,
+    activeBookings: 0,
+    upcomingBookings: 0,
+    completionRate: 0,
+    avgJobTime: 0,
+  });
+  const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const onRefresh = () => {
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load recent bookings
+      const bookingsResponse = await bookingService.getMyBookings();
+      const bookings = bookingsResponse.slice(0, 5); // Get only 5 recent bookings
+      setRecentBookings(bookings);
+      
+      // Calculate stats from bookings
+      const completedBookings = bookingsResponse.filter(b => b.status === 'COMPLETED');
+      const pendingBookings = bookingsResponse.filter(b => b.status === 'PENDING');
+      const activeBookings = bookingsResponse.filter(b => ['ACCEPTED', 'IN_PROGRESS'].includes(b.status));
+      
+      const totalEarnings = completedBookings.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      const thisMonthEarnings = completedBookings
+        .filter(booking => {
+          const bookingDate = new Date(booking.createdAt);
+          return bookingDate.getMonth() === currentMonth && bookingDate.getFullYear() === currentYear;
+        })
+        .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+      
+      // Load reviews for rating stats
+      let averageRating = 0;
+      let totalReviews = 0;
+      if (user?.id) {
+        try {
+          const reviewsResponse = await reviewService.getProviderReviews(user.id);
+          totalReviews = reviewsResponse.length;
+          if (totalReviews > 0) {
+            averageRating = reviewsResponse.reduce((sum, review) => sum + review.rating, 0) / totalReviews;
+          }
+        } catch (error) {
+          console.error('Error loading reviews:', error);
+        }
+      }
+      
+      // Load unread messages count
+      let unreadCount = 0;
+      try {
+        const unreadResponse = await messageService.getUnreadCount();
+        unreadCount = unreadResponse || 0;
+      } catch (error) {
+        console.error('Error loading unread count:', error);
+      }
+      
+      // Calculate completion rate and average job time
+      const completionRate = bookingsResponse.length > 0 
+        ? (completedBookings.length / bookingsResponse.length) * 100 
+        : 0;
+      
+      // Average job time (estimated - would need start/end times from API)
+      const avgJobTime = 2.5; // hours - placeholder
+      
+      setStats({
+        totalEarnings,
+        thisMonthEarnings,
+        completedJobs: completedBookings.length,
+        pendingJobs: pendingBookings.length,
+        averageRating,
+        totalReviews,
+        activeBookings: activeBookings.length,
+        upcomingBookings: pendingBookings.length,
+        completionRate,
+        avgJobTime,
+      });
+      
+      setUnreadCount(unreadCount);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadDashboardData();
+    setRefreshing(false);
   };
 
   const handleBookingPress = (booking: any) => {
@@ -92,7 +187,24 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
     </TouchableOpacity>
   );
 
-  const BookingItem = ({ item }: any) => (
+  const formatBookingDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return `Today, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+    } else if (diffDays === 1) {
+      return `Yesterday, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+    } else if (diffDays <= 7) {
+      return date.toLocaleDateString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+    }
+  };
+
+  const BookingItem = ({ item }: { item: Booking }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -111,7 +223,7 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
           color: colors.text,
           flex: 1,
         }}>
-          {item.service}
+          {item.service.name}
         </Text>
         <View style={{
           backgroundColor: getStatusColor(item.status),
@@ -124,7 +236,7 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
             color: colors.background,
             fontWeight: '500',
           }}>
-            {item.status}
+            {item.status.replace('_', ' ')}
           </Text>
         </View>
       </View>
@@ -134,14 +246,14 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
           fontSize: typography.caption,
           color: colors.textLight,
         }}>
-          {item.customer} • {item.date}
+          {item.customer.username} • {formatBookingDate(item.scheduledTime || item.createdAt)}
         </Text>
         <Text style={{
           fontSize: typography.body,
           fontWeight: 'bold',
           color: colors.primary,
         }}>
-          ${item.amount}
+          ${item.totalAmount || 0}
         </Text>
       </View>
     </TouchableOpacity>
@@ -149,7 +261,15 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading dashboard...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }>
         {/* Header */}
         <View style={{
           paddingHorizontal: spacing.lg,
@@ -299,7 +419,7 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
                 color: colors.background,
                 fontWeight: '600',
               }}>
-                Messages
+                Messages {unreadCount > 0 && `(${unreadCount})`}
               </Text>
             </TouchableOpacity>
             
@@ -366,7 +486,7 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
                 fontWeight: 'bold',
                 color: colors.success,
               }}>
-                95%
+                {stats.completionRate.toFixed(0)}%
               </Text>
               <Text style={{
                 fontSize: typography.caption,
@@ -381,7 +501,7 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
                 fontWeight: 'bold',
                 color: colors.primary,
               }}>
-                4.8
+                {stats.averageRating.toFixed(1)}
               </Text>
               <Text style={{
                 fontSize: typography.caption,
@@ -396,7 +516,7 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
                 fontWeight: 'bold',
                 color: colors.info,
               }}>
-                2.5h
+                {stats.avgJobTime}h
               </Text>
               <Text style={{
                 fontSize: typography.caption,
@@ -407,7 +527,8 @@ const ProviderDashboardScreen = ({ navigation }: any) => {
             </View>
           </View>
         </View>
-      </ScrollView>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
