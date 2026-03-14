@@ -1,109 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  Image,
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockCategories = [
-  { 
-    id: 1, 
-    name: 'Cleaning', 
-    description: 'Professional cleaning services for homes and offices', 
-    icon: '🧹', 
-    servicesCount: 15,
-    activeProviders: 45,
-    avgPrice: 25
-  },
-  { 
-    id: 2, 
-    name: 'Plumbing', 
-    description: 'Expert plumbing solutions for all your needs', 
-    icon: '🔧', 
-    servicesCount: 8,
-    activeProviders: 23,
-    avgPrice: 45
-  },
-  { 
-    id: 3, 
-    name: 'Cooking', 
-    description: 'Home cooking and meal preparation services', 
-    icon: '👨‍🍳', 
-    servicesCount: 12,
-    activeProviders: 34,
-    avgPrice: 30
-  },
-  { 
-    id: 4, 
-    name: 'Electrical', 
-    description: 'Electrical repairs and installation services', 
-    icon: '⚡', 
-    servicesCount: 6,
-    activeProviders: 18,
-    avgPrice: 55
-  },
-  { 
-    id: 5, 
-    name: 'Gardening', 
-    description: 'Garden maintenance and landscaping services', 
-    icon: '🌱', 
-    servicesCount: 10,
-    activeProviders: 27,
-    avgPrice: 35
-  },
-  { 
-    id: 6, 
-    name: 'Painting', 
-    description: 'Interior and exterior painting services', 
-    icon: '🎨', 
-    servicesCount: 7,
-    activeProviders: 21,
-    avgPrice: 40
-  },
-  { 
-    id: 7, 
-    name: 'Carpentry', 
-    description: 'Custom carpentry and furniture work', 
-    icon: '🔨', 
-    servicesCount: 9,
-    activeProviders: 19,
-    avgPrice: 50
-  },
-  { 
-    id: 8, 
-    name: 'Appliance Repair', 
-    description: 'Home appliance repair and maintenance', 
-    icon: '🔌', 
-    servicesCount: 11,
-    activeProviders: 25,
-    avgPrice: 60
-  },
-];
+import serviceService from '../../services/serviceService';
+import { ServiceCategory } from '../../types';
 
 const CategoriesScreen = ({ navigation }: any) => {
-  const [categories, setCategories] = useState(mockCategories);
+  const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchCategories = async () => {
+    try {
+      const data = await serviceService.getCategories();
+      setCategories(data);
+    } catch (error: any) {
+      console.error('Error fetching categories:', error);
+      Alert.alert('Error', 'Failed to load categories.');
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    fetchCategories();
   };
 
-  const handleCategoryPress = (category: any) => {
+  const handleCategoryPress = (category: ServiceCategory) => {
     navigation.navigate('ServiceProviders', { 
       categoryId: category.id, 
       categoryName: category.name 
     });
   };
 
-  const renderCategoryItem = ({ item }: any) => (
+  const renderCategoryItem = ({ item }: { item: ServiceCategory }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -126,7 +71,11 @@ const CategoriesScreen = ({ navigation }: any) => {
         alignItems: 'center',
         marginRight: spacing.md,
       }}>
-        <Text style={{ fontSize: responsiveWidth(30) }}>{item.icon}</Text>
+        {item.iconUrl ? (
+          <Image source={{ uri: item.iconUrl }} style={{ width: 30, height: 30, tintColor: colors.primary }} />
+        ) : (
+          <Text style={{ fontSize: responsiveWidth(30) }}>✨</Text>
+        )}
       </View>
       
       <View style={{ flex: 1 }}>
@@ -148,39 +97,7 @@ const CategoriesScreen = ({ navigation }: any) => {
           {item.description}
         </Text>
         
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{
-              fontSize: typography.caption,
-              color: colors.textLight,
-              marginRight: spacing.sm,
-            }}>
-              {item.servicesCount} services
-            </Text>
-            <Text style={{
-              fontSize: typography.caption,
-              color: colors.textLight,
-            }}>
-              • {item.activeProviders} providers
-            </Text>
-          </View>
-          
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{
-              fontSize: typography.caption,
-              color: colors.textLight,
-            }}>
-              Avg. Price
-            </Text>
-            <Text style={{
-              fontSize: typography.body,
-              fontWeight: '600',
-              color: colors.primary,
-            }}>
-              ${item.avgPrice}/hr
-            </Text>
-          </View>
-        </View>
+        {/* Removed mock stats */}
       </View>
       
       <View style={{
@@ -219,19 +136,25 @@ const CategoriesScreen = ({ navigation }: any) => {
         </View>
 
         {/* Categories List */}
-        <FlatList
-          data={categories}
-          renderItem={renderCategoryItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={{ 
-            paddingHorizontal: spacing.lg, 
-            paddingBottom: spacing.lg 
-          }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          showsVerticalScrollIndicator={false}
-        />
+        {isLoading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : (
+          <FlatList
+            data={categories}
+            renderItem={renderCategoryItem}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={{ 
+              paddingHorizontal: spacing.lg, 
+              paddingBottom: spacing.lg 
+            }}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            showsVerticalScrollIndicator={false}
+          />
+        )}
 
         {/* Stats Footer */}
         <View style={{
@@ -245,8 +168,7 @@ const CategoriesScreen = ({ navigation }: any) => {
             color: colors.textSecondary,
             textAlign: 'center',
           }}>
-            {categories.length} categories available • 
-            {categories.reduce((sum, cat) => sum + cat.activeProviders, 0)} active providers
+            {categories.length} categories available
           </Text>
         </View>
       </View>

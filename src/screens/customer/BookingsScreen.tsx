@@ -1,91 +1,55 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockBookings = [
-  { 
-    id: 1, 
-    service: 'Home Cleaning', 
-    provider: 'Sarah Smith', 
-    status: 'COMPLETED', 
-    date: '2024-02-20', 
-    time: '10:00 AM',
-    amount: 45,
-    rating: 5,
-    canReview: true
-  },
-  { 
-    id: 2, 
-    service: 'Plumbing Repair', 
-    provider: 'Mike Johnson', 
-    status: 'IN_PROGRESS', 
-    date: '2024-02-21', 
-    time: '2:00 PM',
-    amount: 85,
-    rating: null,
-    canReview: false
-  },
-  { 
-    id: 3, 
-    service: 'Cooking', 
-    provider: 'Lisa Davis', 
-    status: 'ACCEPTED', 
-    date: '2024-02-22', 
-    time: '6:00 PM',
-    amount: 60,
-    rating: null,
-    canReview: false
-  },
-  { 
-    id: 4, 
-    service: 'Gardening', 
-    provider: 'Tom Wilson', 
-    status: 'PENDING', 
-    date: '2024-02-23', 
-    time: '9:00 AM',
-    amount: 35,
-    rating: null,
-    canReview: false
-  },
-  { 
-    id: 5, 
-    service: 'Electrical Work', 
-    provider: 'Alex Brown', 
-    status: 'CANCELLED', 
-    date: '2024-02-19', 
-    time: '11:00 AM',
-    amount: 55,
-    rating: null,
-    canReview: false
-  },
-];
+import bookingService from '../../services/bookingService';
+import { Booking } from '../../types';
 
 const BookingsScreen = ({ navigation }: any) => {
-  const [bookings, setBookings] = useState(mockBookings);
+  const { user } = useAuth();
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchBookings = async () => {
+    try {
+      const data = await bookingService.getMyBookings(
+        selectedStatus === 'ALL' ? undefined : selectedStatus
+      );
+      setBookings(data);
+    } catch (error: any) {
+      console.error('Error fetching bookings:', error);
+      Alert.alert('Error', 'Failed to load bookings. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBookings();
+  }, [selectedStatus]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    fetchBookings();
   };
 
-  const handleBookingPress = (booking: any) => {
+  const handleBookingPress = (booking: Booking) => {
     navigation.navigate('BookingDetails', { bookingId: booking.id });
   };
 
-  const handleCancelBooking = (booking: any) => {
+  const handleCancelBooking = async (booking: Booking) => {
     Alert.alert(
       'Cancel Booking',
       'Are you sure you want to cancel this booking?',
@@ -93,49 +57,28 @@ const BookingsScreen = ({ navigation }: any) => {
         { text: 'No', style: 'cancel' },
         {
           text: 'Yes, Cancel',
-          onPress: () => {
-            setBookings(prevBookings =>
-              prevBookings.map(b =>
-                b.id === booking.id ? { ...b, status: 'CANCELLED' } : b
-              )
-            );
+          onPress: async () => {
+            try {
+              await bookingService.cancelBooking(booking.id);
+              fetchBookings();
+            } catch (error: any) {
+              Alert.alert('Error', 'Failed to cancel booking. Please try again.');
+            }
           },
         },
       ]
     );
   };
 
-  const handleReview = (booking: any) => {
+  const handleReview = (booking: Booking) => {
     navigation.navigate('Reviews', { bookingId: booking.id });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'COMPLETED': return colors.success;
-      case 'IN_PROGRESS': return colors.info;
-      case 'PENDING': return colors.warning;
-      case 'ACCEPTED': return colors.primary;
-      case 'CANCELLED': return colors.error;
-      default: return colors.textSecondary;
-    }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'COMPLETED': return 'Completed';
-      case 'IN_PROGRESS': return 'In Progress';
-      case 'PENDING': return 'Pending';
-      case 'ACCEPTED': return 'Accepted';
-      case 'CANCELLED': return 'Cancelled';
-      default: return status;
-    }
-  };
-
-  const filteredBookings = selectedStatus === 'ALL' 
-    ? bookings 
+  const filteredBookings = selectedStatus === 'ALL'
+    ? bookings
     : bookings.filter(booking => booking.status === selectedStatus);
 
-  const renderBookingItem = ({ item }: any) => (
+  const renderBookingItem = ({ item }: { item: Booking }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -155,24 +98,24 @@ const BookingsScreen = ({ navigation }: any) => {
             color: colors.text,
             marginBottom: spacing.xs,
           }}>
-            {item.service}
+            {item.service?.name || 'Service'}
           </Text>
           <Text style={{
             fontSize: typography.body,
             color: colors.textSecondary,
             marginBottom: spacing.xs,
           }}>
-            Provider: {item.provider}
+            Provider: {item.provider?.username || 'Provider'}
           </Text>
           <Text style={{
             fontSize: typography.caption,
             color: colors.textLight,
           }}>
-            {item.date} at {item.time}
+            {new Date(item.scheduledTime || item.createdAt).toLocaleDateString()} at {new Date(item.scheduledTime || item.createdAt).toLocaleTimeString()}
           </Text>
         </View>
         <View style={{
-          backgroundColor: getStatusColor(item.status),
+          backgroundColor: bookingService.getBookingStatusColor(item.status),
           borderRadius: borderRadius.xs,
           paddingHorizontal: spacing.xs,
           paddingVertical: 2,
@@ -182,22 +125,22 @@ const BookingsScreen = ({ navigation }: any) => {
             color: colors.background,
             fontWeight: '500',
           }}>
-            {getStatusText(item.status)}
+            {bookingService.getBookingStatusText(item.status)}
           </Text>
         </View>
       </View>
-      
+
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{
           fontSize: typography.h3,
           fontWeight: 'bold',
           color: colors.primary,
         }}>
-          ${item.amount}
+          ${item.totalAmount || 0}
         </Text>
-        
+
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {item.rating && (
+          {item.review && (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: spacing.sm }}>
               <Text style={{ fontSize: responsiveWidth(14), color: colors.warning, marginRight: spacing.xs }}>
                 ⭐
@@ -207,12 +150,12 @@ const BookingsScreen = ({ navigation }: any) => {
                 color: colors.text,
                 fontWeight: '500',
               }}>
-                {item.rating}.0
+                {item.review.rating}.0
               </Text>
             </View>
           )}
-          
-          {item.status === 'PENDING' && (
+
+          {bookingService.canCancelBooking(item, user?.role || 'CUSTOMER') && (
             <TouchableOpacity
               style={{
                 backgroundColor: colors.error,
@@ -231,8 +174,8 @@ const BookingsScreen = ({ navigation }: any) => {
               </Text>
             </TouchableOpacity>
           )}
-          
-          {item.canReview && (
+
+          {bookingService.canReviewBooking(item, user?.role || 'CUSTOMER') && (
             <TouchableOpacity
               style={{
                 backgroundColor: colors.primary,
@@ -363,8 +306,8 @@ const BookingsScreen = ({ navigation }: any) => {
             color: colors.textSecondary,
             textAlign: 'center',
           }}>
-            Total: {filteredBookings.length} bookings • 
-            Completed: {filteredBookings.filter(b => b.status === 'COMPLETED').length} • 
+            Total: {filteredBookings.length} bookings •
+            Completed: {filteredBookings.filter(b => b.status === 'COMPLETED').length} •
             Active: {filteredBookings.filter(b => ['ACCEPTED', 'IN_PROGRESS'].includes(b.status)).length}
           </Text>
         </View>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,59 +6,118 @@ import {
   FlatList,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockSearchResults = {
-  providers: [
-    { id: 1, name: 'Sarah Smith', service: 'Home Cleaning', rating: 4.8, price: 25, avatar: '👩‍🔧' },
-    { id: 2, name: 'Mike Johnson', service: 'Plumbing', rating: 4.9, price: 45, avatar: '👨‍🔧' },
-    { id: 3, name: 'Lisa Davis', service: 'Cooking', rating: 4.7, price: 30, avatar: '👩‍🍳' },
-  ],
-  services: [
-    { id: 1, name: 'Deep Cleaning', category: 'Cleaning', price: 35, icon: '🧹' },
-    { id: 2, name: 'Regular Cleaning', category: 'Cleaning', price: 25, icon: '🧹' },
-    { id: 3, name: 'Pipe Repair', category: 'Plumbing', price: 55, icon: '🔧' },
-  ],
-  categories: [
-    { id: 1, name: 'Cleaning', icon: '🧹', servicesCount: 15 },
-    { id: 2, name: 'Plumbing', icon: '🔧', servicesCount: 8 },
-    { id: 3, name: 'Cooking', icon: '👨‍🍳', servicesCount: 12 },
-  ],
-};
+import serviceService from '../../services/serviceService';
+import { useAuth } from '../../context/AuthContext';
+import { ServiceCategory, ProviderProfile } from '../../types';
+import { MAP_CONFIG } from '../../constants';
 
 const SearchScreen = ({ navigation }: any) => {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
-  const [searchResults, setSearchResults] = useState(mockSearchResults);
+  const [categories, setCategories] = useState<ServiceCategory[]>([]);
+  const [providers, setProviders] = useState<ProviderProfile[]>([]);
+  const [filteredResults, setFilteredResults] = useState<{
+    providers: ProviderProfile[];
+    categories: ServiceCategory[];
+    services: any[];
+  }>({
+    providers: [],
+    categories: [],
+    services: []
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    // In a real app, this would make an API call
-    // For now, we'll just filter the mock data
-    if (query.trim() === '') {
-      setSearchResults(mockSearchResults);
-    } else {
-      const filtered = {
-        providers: mockSearchResults.providers.filter(p =>
-          p.name.toLowerCase().includes(query.toLowerCase()) ||
-          p.service.toLowerCase().includes(query.toLowerCase())
-        ),
-        services: mockSearchResults.services.filter(s =>
-          s.name.toLowerCase().includes(query.toLowerCase()) ||
-          s.category.toLowerCase().includes(query.toLowerCase())
-        ),
-        categories: mockSearchResults.categories.filter(c =>
-          c.name.toLowerCase().includes(query.toLowerCase())
-        ),
-      };
-      setSearchResults(filtered);
+  const fetchInitialData = async () => {
+    setIsLoading(true);
+    try {
+      const [categoriesData, providersData] = await Promise.all([
+        serviceService.getCategories(),
+        serviceService.getNearbyProviders(
+          user?.currentLocation?.latitude || MAP_CONFIG.DEFAULT_LATITUDE,
+          user?.currentLocation?.longitude || MAP_CONFIG.DEFAULT_LONGITUDE,
+          MAP_CONFIG.SEARCH_RADIUS
+        )
+      ]);
+      setCategories(categoriesData);
+      setProviders(providersData);
+      setFilteredResults({
+        providers: providersData,
+        categories: categoriesData,
+        services: []
+      });
+    } catch (error: any) {
+      console.error('Error fetching initial data:', error);
+      Alert.alert('Error', 'Failed to load data. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const renderProviderItem = ({ item }: any) => (
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
+
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query);
+    setIsSearching(true);
+
+    try {
+      if (query.trim() === '') {
+        setFilteredResults({
+          providers: providers,
+          categories: categories,
+          services: []
+        });
+      } else {
+        const searchResponse = await serviceService.searchServicesAndProviders(query);
+
+        const filteredProviders = providers.filter(p =>
+          p.firstName?.toLowerCase().includes(query.toLowerCase()) ||
+          p.lastName?.toLowerCase().includes(query.toLowerCase()) ||
+          p.user?.username?.toLowerCase().includes(query.toLowerCase())
+        );
+
+        const filteredCategories = categories.filter(c =>
+          c.name.toLowerCase().includes(query.toLowerCase())
+        );
+
+        setFilteredResults({
+          providers: filteredProviders,
+          categories: filteredCategories,
+          services: searchResponse.categories || []
+        });
+      }
+    } catch (error: any) {
+      console.error('Error searching:', error);
+      // Fallback to client-side filtering
+      const filteredProviders = providers.filter(p =>
+        p.firstName?.toLowerCase().includes(query.toLowerCase()) ||
+        p.lastName?.toLowerCase().includes(query.toLowerCase()) ||
+        p.user?.username?.toLowerCase().includes(query.toLowerCase())
+      );
+
+      const filteredCategories = categories.filter(c =>
+        c.name.toLowerCase().includes(query.toLowerCase())
+      );
+
+      setFilteredResults({
+        providers: filteredProviders,
+        categories: filteredCategories,
+        services: []
+      });
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const renderProviderItem = ({ item }: { item: ProviderProfile }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -81,9 +140,9 @@ const SearchScreen = ({ navigation }: any) => {
         alignItems: 'center',
         marginRight: spacing.md,
       }}>
-        <Text style={{ fontSize: responsiveWidth(20) }}>{item.avatar}</Text>
+        <Text style={{ fontSize: responsiveWidth(20) }}>👤</Text>
       </View>
-      
+
       <View style={{ flex: 1 }}>
         <Text style={{
           fontSize: typography.body,
@@ -91,14 +150,14 @@ const SearchScreen = ({ navigation }: any) => {
           color: colors.text,
           marginBottom: spacing.xs,
         }}>
-          {item.name}
+          {item.firstName} {item.lastName}
         </Text>
         <Text style={{
           fontSize: typography.caption,
           color: colors.textSecondary,
           marginBottom: spacing.xs,
         }}>
-          {item.service}
+          @{item.user?.username}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ fontSize: responsiveWidth(14), color: colors.warning, marginRight: spacing.xs }}>
@@ -109,16 +168,18 @@ const SearchScreen = ({ navigation }: any) => {
             color: colors.text,
             fontWeight: '500',
           }}>
-            {item.rating}
+            {item.averageRating || 'N/A'}
           </Text>
-          <Text style={{
-            fontSize: typography.body,
-            fontWeight: 'bold',
-            color: colors.primary,
-            marginLeft: spacing.sm,
-          }}>
-            ${item.price}/hr
-          </Text>
+          {item.verificationStatus === 'VERIFIED' && (
+            <Text style={{
+              fontSize: responsiveWidth(12),
+              color: colors.success,
+              marginLeft: spacing.sm,
+              fontWeight: '600',
+            }}>
+              ✓ Verified
+            </Text>
+          )}
         </View>
       </View>
     </TouchableOpacity>
@@ -135,7 +196,7 @@ const SearchScreen = ({ navigation }: any) => {
         alignItems: 'center',
         ...shadows.small,
       }}
-      onPress={() => navigation.navigate('ServiceProviders', { categoryId: 1 })}
+      onPress={() => navigation.navigate('ServiceProviders', { categoryId: item.id })}
       activeOpacity={0.8}
     >
       <View style={{
@@ -147,9 +208,9 @@ const SearchScreen = ({ navigation }: any) => {
         alignItems: 'center',
         marginRight: spacing.md,
       }}>
-        <Text style={{ fontSize: responsiveWidth(20) }}>{item.icon}</Text>
+        <Text style={{ fontSize: responsiveWidth(20) }}>🔧</Text>
       </View>
-      
+
       <View style={{ flex: 1 }}>
         <Text style={{
           fontSize: typography.body,
@@ -163,7 +224,7 @@ const SearchScreen = ({ navigation }: any) => {
           fontSize: typography.caption,
           color: colors.textSecondary,
         }}>
-          {item.category}
+          {item.category?.name || 'Service'}
         </Text>
         <Text style={{
           fontSize: typography.body,
@@ -171,13 +232,13 @@ const SearchScreen = ({ navigation }: any) => {
           color: colors.primary,
           marginTop: spacing.xs,
         }}>
-          ${item.price}/hr
+          ${item.basePrice || 0}/hr
         </Text>
       </View>
     </TouchableOpacity>
   );
 
-  const renderCategoryItem = ({ item }: any) => (
+  const renderCategoryItem = ({ item }: { item: ServiceCategory }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -188,7 +249,7 @@ const SearchScreen = ({ navigation }: any) => {
         alignItems: 'center',
         ...shadows.small,
       }}
-      onPress={() => navigation.navigate('Categories')}
+      onPress={() => navigation.navigate('ServiceProviders', { categoryId: item.id, categoryName: item.name })}
       activeOpacity={0.8}
     >
       <View style={{
@@ -200,9 +261,9 @@ const SearchScreen = ({ navigation }: any) => {
         alignItems: 'center',
         marginRight: spacing.md,
       }}>
-        <Text style={{ fontSize: responsiveWidth(20) }}>{item.icon}</Text>
+        <Text style={{ fontSize: responsiveWidth(20) }}>{item.iconUrl ? '📁' : '📂'}</Text>
       </View>
-      
+
       <View style={{ flex: 1 }}>
         <Text style={{
           fontSize: typography.body,
@@ -216,7 +277,7 @@ const SearchScreen = ({ navigation }: any) => {
           fontSize: typography.caption,
           color: colors.textSecondary,
         }}>
-          {item.servicesCount} services available
+          {item.services?.length || 0} services available
         </Text>
       </View>
     </TouchableOpacity>
@@ -249,7 +310,7 @@ const SearchScreen = ({ navigation }: any) => {
     if (activeTab === 'all') {
       return (
         <View>
-          {searchResults.providers.length > 0 && (
+          {filteredResults.providers.length > 0 && (
             <View style={{ marginBottom: spacing.lg }}>
               <Text style={{
                 fontSize: typography.h4,
@@ -260,15 +321,15 @@ const SearchScreen = ({ navigation }: any) => {
               }}>
                 Providers
               </Text>
-              {searchResults.providers.map((item) => (
+              {filteredResults.providers.map((item) => (
                 <View key={item.id} style={{ paddingHorizontal: spacing.lg }}>
                   {renderProviderItem({ item })}
                 </View>
               ))}
             </View>
           )}
-          
-          {searchResults.services.length > 0 && (
+
+          {filteredResults.services.length > 0 && (
             <View style={{ marginBottom: spacing.lg }}>
               <Text style={{
                 fontSize: typography.h4,
@@ -279,15 +340,15 @@ const SearchScreen = ({ navigation }: any) => {
               }}>
                 Services
               </Text>
-              {searchResults.services.map((item) => (
+              {filteredResults.services.map((item) => (
                 <View key={item.id} style={{ paddingHorizontal: spacing.lg }}>
                   {renderServiceItem({ item })}
                 </View>
               ))}
             </View>
           )}
-          
-          {searchResults.categories.length > 0 && (
+
+          {filteredResults.categories.length > 0 && (
             <View>
               <Text style={{
                 fontSize: typography.h4,
@@ -298,7 +359,7 @@ const SearchScreen = ({ navigation }: any) => {
               }}>
                 Categories
               </Text>
-              {searchResults.categories.map((item) => (
+              {filteredResults.categories.map((item) => (
                 <View key={item.id} style={{ paddingHorizontal: spacing.lg }}>
                   {renderCategoryItem({ item })}
                 </View>
@@ -310,7 +371,7 @@ const SearchScreen = ({ navigation }: any) => {
     } else if (activeTab === 'providers') {
       return (
         <FlatList
-          data={searchResults.providers}
+          data={filteredResults.providers}
           renderItem={renderProviderItem}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.lg }}
@@ -320,9 +381,9 @@ const SearchScreen = ({ navigation }: any) => {
     } else if (activeTab === 'services') {
       return (
         <FlatList
-          data={searchResults.services}
+          data={filteredResults.services}
           renderItem={renderServiceItem}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item: any) => item.id?.toString() || Math.random().toString()}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.lg }}
           showsVerticalScrollIndicator={false}
         />
@@ -330,7 +391,7 @@ const SearchScreen = ({ navigation }: any) => {
     } else {
       return (
         <FlatList
-          data={searchResults.categories}
+          data={filteredResults.categories}
           renderItem={renderCategoryItem}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.lg }}

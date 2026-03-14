@@ -5,13 +5,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 class AuthService {
   async login(credentials: AuthRequest) {
-    const response = await apiService.post<{ token: string; refreshToken: string; user: User }>(
+    const response = await apiService.post<any>(
       API_ENDPOINTS.LOGIN,
       credentials
     );
 
     if (response.data) {
-      const { token, refreshToken, user } = response.data;
+      const data = response.data;
+      const token = data.token;
+      const refreshToken = data.refreshToken || '';
+      
+      // API might return user nested under data.user or flattened mapping
+      const user = data.user || {
+        id: data.id,
+        username: data.username,
+        role: data.role,
+      };
       
       // Store tokens and user data
       await AsyncStorage.multiSet([
@@ -21,7 +30,7 @@ class AuthService {
         [STORAGE_KEYS.USER_ROLE, user.role],
       ]);
 
-      return response.data;
+      return { ...data, user, token, refreshToken };
     }
 
     throw new Error(response.error || 'Login failed');

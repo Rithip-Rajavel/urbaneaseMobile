@@ -16,7 +16,7 @@
     },
     "servers": [
         {
-            "url": "http://localhost:8080",
+            "url": "http://app.undefineddevelopers.online/urbanease",
             "description": "Generated server url"
         }
     ],
@@ -1450,31 +1450,6 @@
                     }
                 }
             },
-            "Location": {
-                "type": "object",
-                "properties": {
-                    "latitude": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "longitude": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "address": {
-                        "type": "string"
-                    },
-                    "city": {
-                        "type": "string"
-                    },
-                    "state": {
-                        "type": "string"
-                    },
-                    "postalCode": {
-                        "type": "string"
-                    }
-                }
-            },
             "ProviderService": {
                 "type": "object",
                 "properties": {
@@ -1617,9 +1592,6 @@
                             "ADMIN"
                         ]
                     },
-                    "currentLocation": {
-                        "$ref": "#/components/schemas/Location"
-                    },
                     "createdAt": {
                         "type": "string",
                         "format": "date-time"
@@ -1648,9 +1620,6 @@
                     "available": {
                         "type": "boolean"
                     },
-                    "accountNonLocked": {
-                        "type": "boolean"
-                    },
                     "authorities": {
                         "type": "array",
                         "items": {
@@ -1658,6 +1627,9 @@
                         }
                     },
                     "accountNonExpired": {
+                        "type": "boolean"
+                    },
+                    "accountNonLocked": {
                         "type": "boolean"
                     },
                     "credentialsNonExpired": {
@@ -1745,6 +1717,31 @@
                     },
                     "review": {
                         "$ref": "#/components/schemas/Review"
+                    }
+                }
+            },
+            "Location": {
+                "type": "object",
+                "properties": {
+                    "latitude": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "address": {
+                        "type": "string"
+                    },
+                    "city": {
+                        "type": "string"
+                    },
+                    "state": {
+                        "type": "string"
+                    },
+                    "postalCode": {
+                        "type": "string"
                     }
                 }
             },

@@ -1,6 +1,6 @@
 import { Dimensions } from 'react-native';
 
-export const API_BASE_URL = 'http://localhost:8080';
+export const API_BASE_URL = 'https://app.undefineddevelopers.online/urbanease';
 
 export const SCREEN_WIDTH = Dimensions.get('window').width;
 export const SCREEN_HEIGHT = Dimensions.get('window').height;

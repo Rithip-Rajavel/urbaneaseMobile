@@ -7,26 +7,43 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockMessages = [
-  { id: 1, text: 'Hi! I\'m interested in your cleaning service', sender: 'customer', time: '10:00 AM' },
-  { id: 2, text: 'Hello! I\'d be happy to help you with cleaning. What type of cleaning do you need?', sender: 'provider', time: '10:02 AM' },
-  { id: 3, text: 'I need regular home cleaning for my 2-bedroom apartment', sender: 'customer', time: '10:05 AM' },
-  { id: 4, text: 'Perfect! I offer comprehensive cleaning services. My rate is $25/hour and I usually take 2-3 hours for a 2-bedroom apartment.', sender: 'provider', time: '10:07 AM' },
-  { id: 5, text: 'That sounds reasonable. When are you available?', sender: 'customer', time: '10:10 AM' },
-  { id: 6, text: 'I\'m available this Tuesday at 10 AM or Thursday at 2 PM. Which works better for you?', sender: 'provider', time: '10:12 AM' },
-];
+import messageService from '../../services/messageService';
+import { Message } from '../../types';
 
 const ChatScreen = ({ route, navigation }: any) => {
-  const { conversationId, userName, providerId } = route.params || { userName: 'Sarah Smith' };
-  const [messages, setMessages] = useState(mockMessages);
+  const { user } = useAuth();
+  const { conversationId, userName, providerId } = route.params || { userName: 'Unknown', providerId: null };
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+
+  const fetchMessages = async () => {
+    if (!providerId && !conversationId) return;
+
+    setIsLoading(true);
+    try {
+      const data = await messageService.getConversation(providerId || conversationId);
+      setMessages(data);
+    } catch (error: any) {
+      console.error('Error fetching messages:', error);
+      Alert.alert('Error', 'Failed to load messages. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMessages();
+  }, [conversationId, providerId]);
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
@@ -35,34 +52,57 @@ const ChatScreen = ({ route, navigation }: any) => {
     }, 100);
   }, [messages]);
 
-  const handleSendMessage = () => {
-    if (newMessage.trim() === '') return;
-
-    const newMsg = {
-      id: messages.length + 1,
-      text: newMessage.trim(),
-      sender: 'customer',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages(prev => [...prev, newMsg]);
-    setNewMessage('');
-
-    // Simulate provider response
+  useEffect(() => {
+    // Auto-scroll to bottom when new messages arrive
     setTimeout(() => {
-      const providerResponse = {
-        id: messages.length + 2,
-        text: 'Thanks for your message! I\'ll get back to you soon.',
-        sender: 'provider',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }, [messages]);
+
+  const handleSendMessage = async () => {
+    if (newMessage.trim() === '' || isSending || !user) return;
+
+    setIsSending(true);
+    try {
+      await messageService.sendMessage({
+        receiverId: providerId || conversationId,
+        content: newMessage.trim()
+      });
+
+      // Add message to local state immediately
+      const newMsg: Message = {
+        id: messages.length + 1,
+        content: newMessage.trim(),
+        sender: user,
+        receiver: {
+          id: providerId || conversationId,
+          username: userName,
+          email: '',
+          mobileNumber: '',
+          role: 'SERVICE_PROVIDER' as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          active: true,
+          enabled: true,
+          available: true
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        read: false
       };
-      setMessages(prev => [...prev, providerResponse]);
-    }, 2000);
+      setMessages(prev => [...prev, newMsg]);
+      setNewMessage('');
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
+    } finally {
+      setIsSending(false);
+    }
   };
 
-  const renderMessage = ({ item }: any) => {
-    const isCustomer = item.sender === 'customer';
-    
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isCustomer = item.sender?.id === user?.id;
+
     return (
       <View style={{
         flexDirection: isCustomer ? 'row-reverse' : 'row',
@@ -83,7 +123,7 @@ const ChatScreen = ({ route, navigation }: any) => {
             color: isCustomer ? colors.background : colors.text,
             lineHeight: typography.body * 1.4,
           }}>
-            {item.text}
+            {item.content}
           </Text>
           <Text style={{
             fontSize: typography.caption,
@@ -91,7 +131,7 @@ const ChatScreen = ({ route, navigation }: any) => {
             marginTop: spacing.xs,
             textAlign: isCustomer ? 'right' : 'left',
           }}>
-            {item.time}
+            {new Date(item.createdAt).toLocaleTimeString()}
           </Text>
         </View>
       </View>
@@ -162,15 +202,21 @@ const ChatScreen = ({ route, navigation }: any) => {
         </View>
 
         {/* Messages List */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={{ flexGrow: 1 }}
-          showsVerticalScrollIndicator={false}
-          ListFooterComponent={isTyping ? renderTypingIndicator : null}
-        />
+        {isLoading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={{ flexGrow: 1 }}
+            showsVerticalScrollIndicator={false}
+            ListFooterComponent={isTyping ? renderTypingIndicator : null}
+          />
+        )}
 
         {/* Message Input */}
         <KeyboardAvoidingView
@@ -187,7 +233,7 @@ const ChatScreen = ({ route, navigation }: any) => {
             <TouchableOpacity style={{ marginRight: spacing.sm }}>
               <Text style={{ fontSize: responsiveWidth(24) }}>📎</Text>
             </TouchableOpacity>
-            
+
             <View style={{
               flex: 1,
               backgroundColor: colors.background,
@@ -212,7 +258,7 @@ const ChatScreen = ({ route, navigation }: any) => {
                 maxLength={500}
               />
             </View>
-            
+
             <TouchableOpacity
               style={{
                 backgroundColor: colors.primary,
@@ -223,10 +269,10 @@ const ChatScreen = ({ route, navigation }: any) => {
                 alignItems: 'center',
               }}
               onPress={handleSendMessage}
-              disabled={newMessage.trim() === ''}
+              disabled={newMessage.trim() === '' || isSending}
             >
               <Text style={{ fontSize: responsiveWidth(20), color: colors.background }}>
-                ➤
+                {isSending ? '⏳' : '➤'}
               </Text>
             </TouchableOpacity>
           </View>

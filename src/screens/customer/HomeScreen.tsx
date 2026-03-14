@@ -8,38 +8,54 @@ import {
   Image,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockCategories = [
-  { id: 1, name: 'Cleaning', icon: '🧹', description: 'Professional cleaning services' },
-  { id: 2, name: 'Plumbing', icon: '🔧', description: 'Expert plumbing solutions' },
-  { id: 3, name: 'Cooking', icon: '👨‍🍳', description: 'Home cooking and meal prep' },
-  { id: 4, name: 'Electrical', icon: '⚡', description: 'Electrical repairs and installation' },
-  { id: 5, name: 'Gardening', icon: '🌱', description: 'Garden maintenance and landscaping' },
-  { id: 6, name: 'Painting', icon: '🎨', description: 'Interior and exterior painting' },
-];
-
-const mockProviders = [
-  { id: 1, name: 'John Smith', service: 'Cleaning', rating: 4.8, reviews: 127, price: '$25/hr', verified: true },
-  { id: 2, name: 'Sarah Johnson', service: 'Cooking', rating: 4.9, reviews: 89, price: '$30/hr', verified: true },
-  { id: 3, name: 'Mike Wilson', service: 'Plumbing', rating: 4.7, reviews: 203, price: '$45/hr', verified: true },
-];
+import serviceService from '../../services/serviceService';
+import { MAP_CONFIG } from '../../constants';
+// Define types based on what we need or from types/index
+import { ServiceCategory, ProviderProfile } from '../../types';
 
 const HomeScreen = ({ navigation }: any) => {
   const { user, logout } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const [categories, setCategories] = useState<ServiceCategory[]>([]);
+  const [topProviders, setTopProviders] = useState<ProviderProfile[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchHomeData = async () => {
+    try {
+      const [cats, provs] = await Promise.all([
+        serviceService.getCategories(),
+        serviceService.getNearbyProviders(
+          user?.currentLocation?.latitude || MAP_CONFIG.DEFAULT_LATITUDE,
+          user?.currentLocation?.longitude || MAP_CONFIG.DEFAULT_LONGITUDE,
+          MAP_CONFIG.SEARCH_RADIUS
+        )
+      ]);
+      setCategories(cats);
+      // Let's assume the top providers are the first few returned
+      setTopProviders(provs.slice(0, 5));
+    } catch (error: any) {
+      console.error('Error fetching home data:', error);
+      Alert.alert('Error', 'Failed to load data. Please pull to refresh.');
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHomeData();
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    fetchHomeData();
   };
 
   const handleCategoryPress = (category: any) => {
@@ -54,7 +70,7 @@ const HomeScreen = ({ navigation }: any) => {
     navigation.navigate('Bookings');
   };
 
-  const renderCategoryItem = ({ item }: any) => (
+  const renderCategoryItem = ({ item }: { item: ServiceCategory }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -77,7 +93,11 @@ const HomeScreen = ({ navigation }: any) => {
         alignItems: 'center',
         marginBottom: spacing.sm,
       }}>
-        <Text style={{ fontSize: responsiveWidth(24) }}>{item.icon}</Text>
+        {item.iconUrl ? (
+          <Image source={{ uri: item.iconUrl }} style={{ width: 24, height: 24, tintColor: colors.primary }} />
+        ) : (
+          <Text style={{ fontSize: responsiveWidth(24) }}>✨</Text>
+        )}
       </View>
       <Text style={{
         fontSize: typography.caption,
@@ -90,7 +110,7 @@ const HomeScreen = ({ navigation }: any) => {
     </TouchableOpacity>
   );
 
-  const renderProviderItem = ({ item }: any) => (
+  const renderProviderItem = ({ item }: { item: ProviderProfile }) => (
     <TouchableOpacity
       style={{
         backgroundColor: colors.surface,
@@ -113,7 +133,11 @@ const HomeScreen = ({ navigation }: any) => {
         alignItems: 'center',
         marginRight: spacing.md,
       }}>
-        <Text style={{ fontSize: responsiveWidth(20) }}>👤</Text>
+        {item.profileImageUrl ? (
+          <Image source={{ uri: item.profileImageUrl }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+        ) : (
+          <Text style={{ fontSize: responsiveWidth(20) }}>👤</Text>
+        )}
       </View>
       
       <View style={{ flex: 1 }}>
@@ -124,9 +148,9 @@ const HomeScreen = ({ navigation }: any) => {
             color: colors.text,
             marginRight: spacing.sm,
           }}>
-            {item.name}
+            {item.businessName || item.user.username || item.fullName || 'Provider'}
           </Text>
-          {item.verified && (
+          {item.verificationStatus === 'VERIFIED' && (
             <Text style={{ fontSize: responsiveWidth(16) }}>✓</Text>
           )}
         </View>
@@ -136,7 +160,7 @@ const HomeScreen = ({ navigation }: any) => {
           color: colors.textSecondary,
           marginBottom: spacing.xs,
         }}>
-          {item.service} • {item.price}
+          {item.yearsOfExperience ? `${item.yearsOfExperience} yrs exp` : ''} 
         </Text>
         
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -148,14 +172,14 @@ const HomeScreen = ({ navigation }: any) => {
             color: colors.text,
             fontWeight: '500',
           }}>
-            {item.rating}
+            {item.averageRating || 0}
           </Text>
           <Text style={{
             fontSize: typography.caption,
             color: colors.textLight,
             marginLeft: spacing.xs,
           }}>
-            ({item.reviews} reviews)
+            ({item.totalReviews || 0} reviews)
           </Text>
         </View>
       </View>
@@ -241,78 +265,84 @@ const HomeScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </View>
 
-        {/* Categories */}
-        <View style={{ marginBottom: spacing.xl }}>
-          <View style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            paddingHorizontal: spacing.lg,
-            marginBottom: spacing.md,
-          }}>
-            <Text style={{
-              fontSize: typography.h4,
-              fontWeight: 'bold',
-              color: colors.text,
-            }}>
-              Categories
-            </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Categories')}>
-              <Text style={{
-                fontSize: typography.body,
-                color: colors.primary,
-                fontWeight: '500',
-              }}>
-                See All
-              </Text>
-            </TouchableOpacity>
+        {isLoading ? (
+          <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.primary} />
           </View>
-          
-          <FlatList
-            data={mockCategories}
-            renderItem={renderCategoryItem}
-            keyExtractor={(item) => item.id.toString()}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingLeft: spacing.lg, paddingRight: spacing.lg }}
-          />
-        </View>
+        ) : (
+          <View style={{ marginBottom: spacing.xl }}>
+            <View style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingHorizontal: spacing.lg,
+              marginBottom: spacing.md,
+            }}>
+              <Text style={{
+                fontSize: typography.h4,
+                fontWeight: 'bold',
+                color: colors.text,
+              }}>
+                Categories
+              </Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Categories')}>
+                <Text style={{
+                  fontSize: typography.body,
+                  color: colors.primary,
+                  fontWeight: '500',
+                }}>
+                  See All
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            <FlatList
+              data={categories}
+              renderItem={renderCategoryItem}
+              keyExtractor={(item) => item.id.toString()}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingLeft: spacing.lg, paddingRight: spacing.lg }}
+            />
+          </View>
+        )}
 
-        {/* Top Providers */}
-        <View style={{ marginBottom: spacing.xl }}>
-          <View style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            paddingHorizontal: spacing.lg,
-            marginBottom: spacing.md,
-          }}>
-            <Text style={{
-              fontSize: typography.h4,
-              fontWeight: 'bold',
-              color: colors.text,
+        {!isLoading && topProviders.length > 0 && (
+          <View style={{ marginBottom: spacing.xl }}>
+            <View style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingHorizontal: spacing.lg,
+              marginBottom: spacing.md,
             }}>
-              Top Providers
-            </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('ServiceProviders')}>
               <Text style={{
-                fontSize: typography.body,
-                color: colors.primary,
-                fontWeight: '500',
+                fontSize: typography.h4,
+                fontWeight: 'bold',
+                color: colors.text,
               }}>
-                See All
+                Top Providers
               </Text>
-            </TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate('ServiceProviders')}>
+                <Text style={{
+                  fontSize: typography.body,
+                  color: colors.primary,
+                  fontWeight: '500',
+                }}>
+                  See All
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={{ paddingHorizontal: spacing.lg }}>
+              {topProviders.map((provider) => (
+                <View key={provider.id}>
+                  {renderProviderItem({ item: provider })}
+                </View>
+              ))}
+            </View>
           </View>
-          
-          <View style={{ paddingHorizontal: spacing.lg }}>
-            {mockProviders.map((provider) => (
-              <View key={provider.id}>
-                {renderProviderItem({ item: provider })}
-              </View>
-            ))}
-          </View>
-        </View>
+        )}
 
         {/* Quick Actions */}
         <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.xl }}>

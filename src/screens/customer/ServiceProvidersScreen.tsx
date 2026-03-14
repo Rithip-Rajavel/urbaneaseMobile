@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,96 +6,92 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockProviders = [
-  {
-    id: 1,
-    name: 'Sarah Smith',
-    service: 'Home Cleaning',
-    rating: 4.8,
-    reviews: 127,
-    price: 25,
-    experience: 5,
-    verified: true,
-    available: true,
-    distance: '2.3 km',
-    completedJobs: 156,
-    description: 'Professional cleaning with eco-friendly products',
-    avatar: '👩‍🔧'
-  },
-  {
-    id: 2,
-    name: 'Mike Johnson',
-    service: 'Home Cleaning',
-    rating: 4.9,
-    reviews: 89,
-    price: 30,
-    experience: 3,
-    verified: true,
-    available: true,
-    distance: '1.8 km',
-    completedJobs: 98,
-    description: 'Specialized in deep cleaning and organization',
-    avatar: '👨‍🔧'
-  },
-  {
-    id: 3,
-    name: 'Lisa Davis',
-    service: 'Home Cleaning',
-    rating: 4.7,
-    reviews: 45,
-    price: 22,
-    experience: 2,
-    verified: false,
-    available: false,
-    distance: '3.1 km',
-    completedJobs: 67,
-    description: 'Affordable and reliable cleaning services',
-    avatar: '👩‍🔧'
-  },
-  {
-    id: 4,
-    name: 'Tom Wilson',
-    service: 'Home Cleaning',
-    rating: 4.6,
-    reviews: 203,
-    price: 28,
-    experience: 7,
-    verified: true,
-    available: true,
-    distance: '4.2 km',
-    completedJobs: 234,
-    description: 'Experienced cleaner with attention to detail',
-    avatar: '👨‍🔧'
-  },
-];
+import serviceService from '../../services/serviceService';
+import { ProviderProfile } from '../../types';
 
 const ServiceProvidersScreen = ({ route, navigation }: any) => {
-  const { categoryId, categoryName } = route.params || { categoryId: 1, categoryName: 'Cleaning' };
-  const [providers, setProviders] = useState(mockProviders);
+  const { user } = useAuth();
+  const { categoryId, categoryName } = route.params || { categoryId: null, categoryName: 'All Providers' };
+  const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState('rating');
   const [filterVerified, setFilterVerified] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchProviders = async () => {
+    setIsLoading(true);
+    try {
+      let providersData;
+      if (categoryId) {
+        // If categoryId is provided, we need to filter by category
+        const allProviders = await serviceService.getNearbyProviders(
+          user?.currentLocation?.latitude || 37.78825,
+          user?.currentLocation?.longitude || -122.4324,
+          50 // Larger radius to get more providers
+        );
+        providersData = allProviders.filter(provider =>
+          provider.user?.active && true // Basic filter since we don't have services property
+        );
+      } else {
+        providersData = await serviceService.getNearbyProviders(
+          user?.currentLocation?.latitude || 37.78825,
+          user?.currentLocation?.longitude || -122.4324,
+          50
+        );
+      }
+
+      // Apply filters
+      let filteredProviders = providersData;
+      if (filterVerified) {
+        filteredProviders = filteredProviders.filter(p => p.verificationStatus === 'VERIFIED');
+      }
+
+      // Apply sorting
+      filteredProviders.sort((a, b) => {
+        switch (sortBy) {
+          case 'rating':
+            return (b.averageRating || 0) - (a.averageRating || 0);
+          case 'experience':
+            return (b.yearsOfExperience || 0) - (a.yearsOfExperience || 0);
+          case 'price':
+            return 0; // Remove price sorting since we don't have direct access to service prices
+          default:
+            return 0;
+        }
+      });
+
+      setProviders(filteredProviders);
+    } catch (error: any) {
+      console.error('Error fetching providers:', error);
+      Alert.alert('Error', 'Failed to load providers. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProviders();
+  }, [categoryId, filterVerified, sortBy]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    fetchProviders();
   };
 
   const handleProviderPress = (provider: any) => {
     navigation.navigate('BookingDetails', { providerId: provider.id });
   };
 
-  const handleBookNow = (provider: any) => {
+  const handleBookNow = (provider: ProviderProfile) => {
     Alert.alert(
       'Book Service',
-      `Book ${provider.name} for ${provider.service}?`,
+      `Book ${provider.firstName} ${provider.lastName} for services?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -108,40 +104,22 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
     );
   };
 
-  const handleChat = (provider: any) => {
-    navigation.navigate('Chat', { 
-      providerId: provider.id, 
-      userName: provider.name 
+  const handleChat = (provider: ProviderProfile) => {
+    navigation.navigate('Chat', {
+      providerId: provider.id,
+      userName: `${provider.firstName} ${provider.lastName}`
     });
   };
 
   const handleSort = (type: string) => {
     setSortBy(type);
-    let sorted = [...providers];
-    
-    switch (type) {
-      case 'rating':
-        sorted.sort((a, b) => b.rating - a.rating);
-        break;
-      case 'price':
-        sorted.sort((a, b) => a.price - b.price);
-        break;
-      case 'distance':
-        sorted.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
-        break;
-      case 'experience':
-        sorted.sort((a, b) => b.experience - a.experience);
-        break;
-    }
-    
-    setProviders(sorted);
   };
 
-  const filteredProviders = filterVerified 
-    ? providers.filter(p => p.verified)
+  const filteredProviders = filterVerified
+    ? providers.filter(p => p.verificationStatus === 'VERIFIED')
     : providers;
 
-  const renderProviderItem = ({ item }: any) => (
+  const renderProviderItem = ({ item }: { item: ProviderProfile }) => (
     <View style={{
       backgroundColor: colors.surface,
       borderRadius: borderRadius.md,
@@ -163,9 +141,13 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
             alignItems: 'center',
             marginRight: spacing.md,
           }}>
-            <Text style={{ fontSize: responsiveWidth(30) }}>{item.avatar}</Text>
+            {item.profileImageUrl ? (
+              <Text style={{ fontSize: responsiveWidth(30) }}>👤</Text>
+            ) : (
+              <Text style={{ fontSize: responsiveWidth(30) }}>👤</Text>
+            )}
           </View>
-          
+
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs }}>
               <Text style={{
@@ -174,30 +156,30 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
                 color: colors.text,
                 marginRight: spacing.sm,
               }}>
-                {item.name}
+                {item.firstName} {item.lastName}
               </Text>
-              {item.verified && (
+              {item.verificationStatus === 'VERIFIED' && (
                 <Text style={{ fontSize: responsiveWidth(14), color: colors.success }}>✓</Text>
               )}
             </View>
-            
+
             <Text style={{
               fontSize: typography.caption,
               color: colors.textSecondary,
               marginBottom: spacing.xs,
             }}>
-              {item.experience} years experience • {item.completedJobs} jobs completed
+              {item.yearsOfExperience} years experience • {item.completedJobs || 0} jobs completed
             </Text>
-            
+
             <Text style={{
               fontSize: typography.caption,
               color: colors.textLight,
               marginBottom: spacing.sm,
               lineHeight: typography.caption * 1.3,
             }}>
-              {item.description}
+              {item.bio || 'Professional service provider'}
             </Text>
-            
+
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={{ fontSize: responsiveWidth(14), color: colors.warning, marginRight: spacing.xs }}>
                 ⭐
@@ -208,26 +190,26 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
                 fontWeight: '500',
                 marginRight: spacing.sm,
               }}>
-                {item.rating}
+                {item.averageRating || 'N/A'}
               </Text>
               <Text style={{
                 fontSize: typography.caption,
                 color: colors.textLight,
                 marginRight: spacing.sm,
               }}>
-                ({item.reviews} reviews)
+                ({item.totalReviews || 0} reviews)
               </Text>
               <Text style={{
                 fontSize: typography.caption,
                 color: colors.textLight,
               }}>
-                • {item.distance}
+                • Available
               </Text>
             </View>
           </View>
         </View>
       </TouchableOpacity>
-      
+
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View>
           <Text style={{
@@ -235,7 +217,7 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
             fontWeight: 'bold',
             color: colors.primary,
           }}>
-            ${item.price}/hr
+            Contact for pricing
           </Text>
           <View style={{
             flexDirection: 'row',
@@ -246,18 +228,18 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
               width: 8,
               height: 8,
               borderRadius: 4,
-              backgroundColor: item.available ? colors.success : colors.error,
+              backgroundColor: colors.success,
               marginRight: spacing.xs,
             }} />
             <Text style={{
               fontSize: typography.caption,
               color: colors.textLight,
             }}>
-              {item.available ? 'Available' : 'Busy'}
+              Available
             </Text>
           </View>
         </View>
-        
+
         <View style={{ flexDirection: 'row' }}>
           <TouchableOpacity
             style={{
@@ -273,16 +255,15 @@ const ServiceProvidersScreen = ({ route, navigation }: any) => {
           >
             <Text style={{ fontSize: responsiveWidth(16) }}>💬</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={{
-              backgroundColor: item.available ? colors.primary : colors.textLight,
+              backgroundColor: colors.primary,
               borderRadius: borderRadius.sm,
               paddingVertical: spacing.sm,
               paddingHorizontal: spacing.md,
             }}
             onPress={() => handleBookNow(item)}
-            disabled={!item.available}
           >
             <Text style={{
               fontSize: typography.caption,

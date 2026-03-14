@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,30 +6,52 @@ import {
   ScrollView,
   Alert,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
-
-// Mock data - will be replaced with API calls
-const mockBooking = {
-  id: 1,
-  service: 'Home Cleaning',
-  provider: { name: 'Sarah Smith', avatar: '👩‍🔧' },
-  date: '2024-02-20',
-};
+import bookingService from '../../services/bookingService';
+import reviewService from '../../services/reviewService';
+import { Booking, Review } from '../../types';
 
 const ReviewsScreen = ({ route, navigation }: any) => {
   const { bookingId } = route.params || { bookingId: 1 };
-  const [booking] = useState(mockBooking);
+  const [booking, setBooking] = useState<Booking | null>(null);
+  const [existingReview, setExistingReview] = useState<Review | null>(null);
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchBookingAndReview = async () => {
+    try {
+      const [bookingData, reviewData] = await Promise.all([
+        bookingService.getBooking(bookingId),
+        reviewService.getBookingReview(bookingId)
+      ]);
+      setBooking(bookingData);
+      setExistingReview(reviewData);
+      if (reviewData) {
+        setRating(reviewData.rating);
+        setReview(reviewData.comment || '');
+      }
+    } catch (error: any) {
+      console.error('Error fetching booking and review:', error);
+      Alert.alert('Error', 'Failed to load booking details. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBookingAndReview();
+  }, [bookingId]);
 
   const handleRatingPress = (value: number) => {
     setRating(value);
   };
 
-  const handleSubmitReview = () => {
+  const handleSubmitReview = async () => {
     if (rating === 0) {
       Alert.alert('Rating Required', 'Please select a rating before submitting.');
       return;
@@ -41,10 +63,13 @@ const ReviewsScreen = ({ route, navigation }: any) => {
     }
 
     setIsSubmitting(true);
+    try {
+      await reviewService.createReview({
+        bookingId: bookingId,
+        rating: rating,
+        comment: review.trim()
+      });
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsSubmitting(false);
       Alert.alert(
         'Thank You!',
         'Your review has been submitted successfully.',
@@ -55,7 +80,12 @@ const ReviewsScreen = ({ route, navigation }: any) => {
           },
         ]
       );
-    }, 1500);
+    } catch (error: any) {
+      console.error('Error submitting review:', error);
+      Alert.alert('Error', 'Failed to submit review. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const renderStar = (index: number) => {
@@ -71,6 +101,16 @@ const ReviewsScreen = ({ route, navigation }: any) => {
       </TouchableOpacity>
     );
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -125,7 +165,7 @@ const ReviewsScreen = ({ route, navigation }: any) => {
               alignItems: 'center',
               marginRight: spacing.md,
             }}>
-              <Text style={{ fontSize: responsiveWidth(20) }}>{booking.provider.avatar}</Text>
+              <Text style={{ fontSize: responsiveWidth(20) }}>👤</Text>
             </View>
 
             <View>
@@ -134,13 +174,13 @@ const ReviewsScreen = ({ route, navigation }: any) => {
                 fontWeight: '600',
                 color: colors.text,
               }}>
-                {booking.service}
+                {booking?.service?.name || 'Service'}
               </Text>
               <Text style={{
                 fontSize: typography.caption,
                 color: colors.textSecondary,
               }}>
-                with {booking.provider.name}
+                {' '}with {booking?.provider?.username || 'Provider'}
               </Text>
             </View>
           </View>
@@ -149,7 +189,7 @@ const ReviewsScreen = ({ route, navigation }: any) => {
             fontSize: typography.caption,
             color: colors.textLight,
           }}>
-            Service date: {booking.date}
+            Service date: {booking ? new Date(booking.scheduledTime || booking.createdAt).toLocaleDateString() : 'Loading...'}
           </Text>
         </View>
 
@@ -209,12 +249,13 @@ const ReviewsScreen = ({ route, navigation }: any) => {
             padding: spacing.md,
             backgroundColor: colors.background,
           }}>
-            <Text style={{
-              fontSize: typography.body,
-              color: colors.text,
-              height: responsiveHeight(120),
-              textAlignVertical: 'top',
-            }}
+            <TextInput
+              style={{
+                fontSize: typography.body,
+                color: colors.text,
+                height: responsiveHeight(120),
+                textAlignVertical: 'top',
+              }}
               placeholder="Share details about your experience..."
               placeholderTextColor={colors.textLight}
               multiline
