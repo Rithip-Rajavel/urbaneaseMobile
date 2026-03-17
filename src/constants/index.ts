@@ -78,6 +78,11 @@ export const API_ENDPOINTS = {
   MARK_MESSAGES_READ: '/api/messages/read/{senderId}',
   MARK_ALL_READ: '/api/messages/read/all',
 
+  // Profile
+  GET_PROFILE: '/api/profile/{userId}',
+  GET_PROVIDER_PROFILE: '/api/profile/providers/{providerId}',
+  GET_MY_PROFILE: '/api/profile/me',
+
   // Admin
   GET_ALL_USERS: '/api/admin/users',
   GET_ALL_BOOKINGS: '/api/admin/bookings',

@@ -7,12 +7,14 @@ import {
   Alert,
   Image,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, typography, borderRadius, responsiveHeight, responsiveWidth } from '../../utils/theme';
 import bookingService from '../../services/bookingService';
 import reviewService from '../../services/reviewService';
+import profileService from '../../services/profileService';
 import { ProviderProfile, Booking, Review, ProviderService } from '../../types';
 
 interface ProviderData {
@@ -43,24 +45,24 @@ const ProviderProfileScreen = ({ navigation }: any) => {
     },
   });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
 
   const loadProviderData = async () => {
     try {
       setLoading(true);
-      
+
       if (!user?.id) {
         throw new Error('User not found');
       }
 
-      // Load provider profile
-      // Note: This would need a dedicated API endpoint to get provider profile by user ID
-      // For now, we'll construct it from available data
-      
+      // Load provider profile from API
+      const profile = await profileService.getProviderProfile(user.id);
+
       // Load bookings for stats
       const bookingsResponse = await bookingService.getMyBookings();
       const completedBookings = bookingsResponse.filter(b => b.status === 'COMPLETED');
-      
+
       // Load reviews for rating
       let averageRating = 0;
       let totalReviews = 0;
@@ -73,31 +75,15 @@ const ProviderProfileScreen = ({ navigation }: any) => {
       } catch (error) {
         console.error('Error loading reviews:', error);
       }
-      
+
       // Calculate stats
       const totalEarnings = completedBookings.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
-      const completionRate = bookingsResponse.length > 0 
-        ? (completedBookings.length / bookingsResponse.length) * 100 
+      const completionRate = bookingsResponse.length > 0
+        ? (completedBookings.length / bookingsResponse.length) * 100
         : 0;
-      
-      // Create a mock provider profile based on user data
-      const profile: ProviderProfile = {
-        id: user.id,
-        user: user,
-        firstName: user.username.split('_')[0] || 'First',
-        lastName: user.username.split('_')[1] || 'Last',
-        bio: 'Professional service provider',
-        yearsOfExperience: 3,
-        averageRating,
-        totalReviews,
-        completedJobs: completedBookings.length,
-        verificationStatus: 'VERIFIED', // This would come from API
-        businessName: `${user.username}'s Services`,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      };
-      
-      // Mock services - this would come from API
+
+      // Load provider services - this would need a dedicated API endpoint
+      // For now, we'll use mock services until the API endpoint is available
       const services: ProviderService[] = [
         {
           id: 1,
@@ -115,7 +101,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
           },
           customPrice: 25,
           description: 'Standard home cleaning service',
-          yearsOfExperience: 3,
+          yearsOfExperience: profile.yearsOfExperience || 3,
           createdAt: '',
           updatedAt: '',
           active: true,
@@ -136,13 +122,13 @@ const ProviderProfileScreen = ({ navigation }: any) => {
           },
           customPrice: 35,
           description: 'Thorough deep cleaning service',
-          yearsOfExperience: 3,
+          yearsOfExperience: profile.yearsOfExperience || 3,
           createdAt: '',
           updatedAt: '',
           active: true,
         },
       ];
-      
+
       setProviderData({
         profile,
         services,
@@ -160,12 +146,18 @@ const ProviderProfileScreen = ({ navigation }: any) => {
       Alert.alert('Error', 'Failed to load profile data. Please try again.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
     loadProviderData();
   }, [user]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadProviderData();
+  };
 
   const handleEditProfile = () => {
     Alert.alert(
@@ -304,7 +296,7 @@ const ProviderProfileScreen = ({ navigation }: any) => {
           {item.description}
         </Text>
       </View>
-      
+
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={{
           fontSize: typography.h3,
@@ -349,314 +341,319 @@ const ProviderProfileScreen = ({ navigation }: any) => {
           <Text style={{ marginTop: spacing.md, color: colors.textSecondary }}>Loading profile...</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        {/* Header */}
-        <View style={{
-          paddingHorizontal: spacing.lg,
-          paddingTop: spacing.md,
-          paddingBottom: spacing.lg,
-        }}>
-          <Text style={{
-            fontSize: typography.h2,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: spacing.sm,
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {/* Header */}
+          <View style={{
+            paddingHorizontal: spacing.lg,
+            paddingTop: spacing.md,
+            paddingBottom: spacing.lg,
           }}>
-            Profile
-          </Text>
-          <Text style={{
-            fontSize: typography.body,
-            color: colors.textSecondary,
-          }}>
-            Manage your professional profile
-          </Text>
-        </View>
+            <Text style={{
+              fontSize: typography.h2,
+              fontWeight: 'bold',
+              color: colors.text,
+              marginBottom: spacing.sm,
+            }}>
+              Profile
+            </Text>
+            <Text style={{
+              fontSize: typography.body,
+              color: colors.textSecondary,
+            }}>
+              Manage your professional profile
+            </Text>
+          </View>
 
-        {/* Profile Info Card */}
-        {providerData.profile && (
+          {/* Profile Info Card */}
+          {providerData.profile && (
+            <View style={{
+              backgroundColor: colors.surface,
+              borderRadius: borderRadius.md,
+              padding: spacing.lg,
+              marginHorizontal: spacing.lg,
+              marginBottom: spacing.lg,
+              alignItems: 'center',
+              ...shadows.small,
+            }}>
+              <View style={{
+                width: responsiveWidth(80),
+                height: responsiveWidth(80),
+                borderRadius: responsiveWidth(40),
+                backgroundColor: colors.background,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: spacing.md,
+              }}>
+                <Text style={{ fontSize: responsiveWidth(40) }}>👩‍🔧</Text>
+              </View>
+
+              <Text style={{
+                fontSize: typography.h3,
+                fontWeight: 'bold',
+                color: colors.text,
+                marginBottom: spacing.xs,
+              }}>
+                {providerData.profile.firstName} {providerData.profile.lastName}
+              </Text>
+
+              <View style={{
+                backgroundColor: colors.success,
+                borderRadius: borderRadius.xs,
+                paddingHorizontal: spacing.xs,
+                paddingVertical: 2,
+                alignSelf: 'flex-start',
+                marginBottom: spacing.sm,
+              }}>
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.background,
+                  fontWeight: '600',
+                }}>
+                  ✓ Verified
+                </Text>
+              </View>
+
+              <Text style={{
+                fontSize: typography.body,
+                color: colors.textSecondary,
+                textAlign: 'center',
+                marginBottom: spacing.sm,
+              }}>
+                {providerData.profile.businessName}
+              </Text>
+            </View>
+          )}
+
+          {/* Stats Overview */}
           <View style={{
             backgroundColor: colors.surface,
             borderRadius: borderRadius.md,
             padding: spacing.lg,
             marginHorizontal: spacing.lg,
             marginBottom: spacing.lg,
-            alignItems: 'center',
             ...shadows.small,
           }}>
-            <View style={{
-              width: responsiveWidth(80),
-              height: responsiveWidth(80),
-              borderRadius: responsiveWidth(40),
-              backgroundColor: colors.background,
-              justifyContent: 'center',
-              alignItems: 'center',
-              marginBottom: spacing.md,
-            }}>
-              <Text style={{ fontSize: responsiveWidth(40) }}>👩‍🔧</Text>
-            </View>
-            
             <Text style={{
-              fontSize: typography.h3,
+              fontSize: typography.h4,
               fontWeight: 'bold',
               color: colors.text,
-              marginBottom: spacing.xs,
+              marginBottom: spacing.md,
             }}>
-              {providerData.profile.firstName} {providerData.profile.lastName}
+              Performance Stats
             </Text>
-            
-            <View style={{
-              backgroundColor: colors.success,
-              borderRadius: borderRadius.xs,
-              paddingHorizontal: spacing.xs,
-              paddingVertical: 2,
-              alignSelf: 'flex-start',
-              marginBottom: spacing.sm,
-            }}>
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.background,
-                fontWeight: '600',
-              }}>
-                ✓ Verified
-              </Text>
-            </View>
-            
-            <Text style={{
-              fontSize: typography.body,
-              color: colors.textSecondary,
-              textAlign: 'center',
-              marginBottom: spacing.sm,
-            }}>
-              {providerData.profile.businessName}
-            </Text>
-          </View>
-        )}
 
-        {/* Stats Overview */}
-        <View style={{
-          backgroundColor: colors.surface,
-          borderRadius: borderRadius.md,
-          padding: spacing.lg,
-          marginHorizontal: spacing.lg,
-          marginBottom: spacing.lg,
-          ...shadows.small,
-        }}>
-          <Text style={{
-            fontSize: typography.h4,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: spacing.md,
-          }}>
-            Performance Stats
-          </Text>
-          
-          <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{
-                fontSize: typography.h3,
-                fontWeight: 'bold',
-                color: colors.primary,
-              }}>
-                {providerData.stats.totalBookings}
-              </Text>
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.textSecondary,
-              }}>
-                Total Jobs
-              </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{
+                  fontSize: typography.h3,
+                  fontWeight: 'bold',
+                  color: colors.primary,
+                }}>
+                  {providerData.stats.totalBookings}
+                </Text>
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.textSecondary,
+                }}>
+                  Total Jobs
+                </Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{
+                  fontSize: typography.h3,
+                  fontWeight: 'bold',
+                  color: colors.success,
+                }}>
+                  {providerData.stats.completedBookings}
+                </Text>
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.textSecondary,
+                }}>
+                  Completed
+                </Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{
+                  fontSize: typography.h3,
+                  fontWeight: 'bold',
+                  color: colors.warning,
+                }}>
+                  ⭐ {providerData.stats.averageRating}
+                </Text>
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.textSecondary,
+                }}>
+                  Avg Rating
+                </Text>
+              </View>
             </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{
-                fontSize: typography.h3,
-                fontWeight: 'bold',
-                color: colors.success,
-              }}>
-                {providerData.stats.completedBookings}
-              </Text>
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.textSecondary,
-              }}>
-                Completed
-              </Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{
-                fontSize: typography.h3,
-                fontWeight: 'bold',
-                color: colors.warning,
-              }}>
-                ⭐ {providerData.stats.averageRating}
-              </Text>
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.textSecondary,
-              }}>
-                Avg Rating
-              </Text>
-            </View>
-          </View>
-          
-          <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.md }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{
-                fontSize: typography.h3,
-                fontWeight: 'bold',
-                color: colors.info,
-              }}>
-                ${providerData.stats.responseTime}
-              </Text>
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.textSecondary,
-              }}>
-                Avg Response
-              </Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{
-                fontSize: typography.h3,
-                fontWeight: 'bold',
-                color: colors.success,
-              }}>
-                {providerData.stats.completionRate}%
-              </Text>
-              <Text style={{
-                fontSize: typography.caption,
-                color: colors.textSecondary,
-              }}>
-                Success Rate
-              </Text>
-            </View>
-          </View>
-        </View>
 
-        {/* Contact Information */}
-        <View style={{
-          backgroundColor: colors.surface,
-          borderRadius: borderRadius.md,
-          padding: spacing.lg,
-          marginHorizontal: spacing.lg,
-          marginBottom: spacing.lg,
-          ...shadows.small,
-        }}>
-          <Text style={{
-            fontSize: typography.h4,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: spacing.md,
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.md }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{
+                  fontSize: typography.h3,
+                  fontWeight: 'bold',
+                  color: colors.info,
+                }}>
+                  ${providerData.stats.responseTime}
+                </Text>
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.textSecondary,
+                }}>
+                  Avg Response
+                </Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{
+                  fontSize: typography.h3,
+                  fontWeight: 'bold',
+                  color: colors.success,
+                }}>
+                  {providerData.stats.completionRate}%
+                </Text>
+                <Text style={{
+                  fontSize: typography.caption,
+                  color: colors.textSecondary,
+                }}>
+                  Success Rate
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Contact Information */}
+          <View style={{
+            backgroundColor: colors.surface,
+            borderRadius: borderRadius.md,
+            padding: spacing.lg,
+            marginHorizontal: spacing.lg,
+            marginBottom: spacing.lg,
+            ...shadows.small,
           }}>
-            Contact Information
-          </Text>
-          
-          <View style={{ marginBottom: spacing.sm }}>
             <Text style={{
-              fontSize: typography.caption,
-              color: colors.textSecondary,
-              marginBottom: spacing.xs,
-            }}>
-              Email
-            </Text>
-            <Text style={{
-              fontSize: typography.body,
+              fontSize: typography.h4,
+              fontWeight: 'bold',
               color: colors.text,
+              marginBottom: spacing.md,
             }}>
-              {user?.email || 'No email'}
+              Contact Information
             </Text>
+
+            <View style={{ marginBottom: spacing.sm }}>
+              <Text style={{
+                fontSize: typography.caption,
+                color: colors.textSecondary,
+                marginBottom: spacing.xs,
+              }}>
+                Email
+              </Text>
+              <Text style={{
+                fontSize: typography.body,
+                color: colors.text,
+              }}>
+                {user?.email || 'No email'}
+              </Text>
+            </View>
+
+            <View style={{ marginBottom: spacing.sm }}>
+              <Text style={{
+                fontSize: typography.caption,
+                color: colors.textSecondary,
+                marginBottom: spacing.xs,
+              }}>
+                Phone
+              </Text>
+              <Text style={{
+                fontSize: typography.body,
+                color: colors.text,
+              }}>
+                {user?.mobileNumber || 'No phone'}
+              </Text>
+            </View>
           </View>
-          
-          <View style={{ marginBottom: spacing.sm }}>
+
+          {/* Services */}
+          <View style={{
+            backgroundColor: colors.surface,
+            borderRadius: borderRadius.md,
+            padding: spacing.lg,
+            marginHorizontal: spacing.lg,
+            marginBottom: spacing.lg,
+            ...shadows.small,
+          }}>
             <Text style={{
-              fontSize: typography.caption,
-              color: colors.textSecondary,
-              marginBottom: spacing.xs,
-            }}>
-              Phone
-            </Text>
-            <Text style={{
-              fontSize: typography.body,
+              fontSize: typography.h4,
+              fontWeight: 'bold',
               color: colors.text,
+              marginBottom: spacing.md,
             }}>
-              {user?.mobileNumber || 'No phone'}
+              My Services
             </Text>
+
+            {providerData.services.map((service) => (
+              <ServiceItem key={service.id} item={service} />
+            ))}
           </View>
-        </View>
 
-        {/* Services */}
-        <View style={{
-          backgroundColor: colors.surface,
-          borderRadius: borderRadius.md,
-          padding: spacing.lg,
-          marginHorizontal: spacing.lg,
-          marginBottom: spacing.lg,
-          ...shadows.small,
-        }}>
-          <Text style={{
-            fontSize: typography.h4,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: spacing.md,
-          }}>
-            My Services
-          </Text>
-          
-          {providerData.services.map((service) => (
-            <ServiceItem key={service.id} item={service} />
-          ))}
-        </View>
+          {/* Menu Options */}
+          <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.xl }}>
+            <Text style={{
+              fontSize: typography.h4,
+              fontWeight: 'bold',
+              color: colors.text,
+              marginBottom: spacing.md,
+            }}>
+              Account Settings
+            </Text>
 
-        {/* Menu Options */}
-        <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.xl }}>
-          <Text style={{
-            fontSize: typography.h4,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: spacing.md,
-          }}>
-            Account Settings
-          </Text>
-          
-          <ProfileMenuItem
-            icon="✏️"
-            title="Edit Profile"
-            onPress={handleEditProfile}
-          />
-          
-          <ProfileMenuItem
-            icon="⭐"
-            title="My Reviews"
-            onPress={handleViewReviews}
-          />
-          
-          <ProfileMenuItem
-            icon="⚙️"
-            title="Settings"
-            onPress={handleSettings}
-          />
-          
-          <ProfileMenuItem
-            icon="❓"
-            title="Help & Support"
-            onPress={() => Alert.alert('Help & Support', 'Help feature coming soon!')}
-          />
-          
-          <ProfileMenuItem
-            icon="ℹ️"
-            title="About UrbanEase"
-            onPress={() => Alert.alert(
-              'About UrbanEase',
-              'UrbanEase v1.0.0\n\nYour trusted partner for domestic services.\n\n© 2024 UrbanEase Inc.'
-            )}
-          />
-          
-          <ProfileMenuItem
-            icon="🚪"
-            title="Logout"
-            onPress={handleLogout}
-            showArrow={false}
-          />
-        </View>
+            <ProfileMenuItem
+              icon="✏️"
+              title="Edit Profile"
+              onPress={handleEditProfile}
+            />
+
+            <ProfileMenuItem
+              icon="⭐"
+              title="My Reviews"
+              onPress={handleViewReviews}
+            />
+
+            <ProfileMenuItem
+              icon="⚙️"
+              title="Settings"
+              onPress={handleSettings}
+            />
+
+            <ProfileMenuItem
+              icon="❓"
+              title="Help & Support"
+              onPress={() => Alert.alert('Help & Support', 'Help feature coming soon!')}
+            />
+
+            <ProfileMenuItem
+              icon="ℹ️"
+              title="About UrbanEase"
+              onPress={() => Alert.alert(
+                'About UrbanEase',
+                'UrbanEase v1.0.0\n\nYour trusted partner for domestic services.\n\n© 2024 UrbanEase Inc.'
+              )}
+            />
+
+            <ProfileMenuItem
+              icon="🚪"
+              title="Logout"
+              onPress={handleLogout}
+              showArrow={false}
+            />
+          </View>
         </ScrollView>
       )}
     </SafeAreaView>

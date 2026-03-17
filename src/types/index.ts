@@ -8,6 +8,18 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   lastLogin?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  bio?: string;
+  profileImageUrl?: string;
+  yearsOfExperience?: number;
+  averageRating?: number;
+  totalReviews?: number;
+  completedJobs?: number;
+  verificationStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  businessName?: string;
+  businessLicense?: string;
   active: boolean;
   enabled: boolean;
   available: boolean;
